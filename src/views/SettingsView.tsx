@@ -1,6 +1,7 @@
 import { Sparkles, RefreshCw, Trash2, User, Download, Upload } from 'lucide-react';
 import { usePortfolio } from '../state/PortfolioContext';
 import ThemeSettingsCard from '../components/settings/ThemeSettingsCard';
+import ClassJoinCard from '../components/settings/ClassJoinCard';
 
 // ⑤ 환경 설정 화면
 export default function SettingsView() {
@@ -17,6 +18,9 @@ export default function SettingsView() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       {/* 화면 테마 (색상 · 글꼴 · 글자 크기) */}
+      {/* 학급 참여 (서버 저장) */}
+      <ClassJoinCard />
+
       <ThemeSettingsCard />
 
       {/* Account Profile Setup Form */}

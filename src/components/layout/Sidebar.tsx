@@ -9,6 +9,7 @@ import { NAV_ITEMS } from './navItems';
 // - 휴대폰: 숨김 (대신 BottomNav 사용)
 export default function Sidebar() {
   const {
+    classSession,
     currentView,
     unlockedBadgeCount,
     selectedDate,
@@ -41,9 +42,13 @@ export default function Sidebar() {
             {userInfo.name[0]}
           </div>
           <div className="hidden lg:block min-w-0">
-            <div className="text-xs text-slate-400 truncate">{userInfo.school}</div>
+            <div className="text-xs text-slate-400 truncate">{classSession ? classSession.className : userInfo.school}</div>
             <div className="text-sm font-bold text-white truncate">
-              {userInfo.grade}학년 {userInfo.classroom}반 {userInfo.name}
+              {classSession
+                ? classSession.nickname === `${classSession.number}번`
+                  ? classSession.nickname
+                  : `${classSession.number}번 ${classSession.nickname}`
+                : `${userInfo.grade}학년 ${userInfo.classroom}반 ${userInfo.name}`}
             </div>
           </div>
         </div>
@@ -100,7 +105,7 @@ export default function Sidebar() {
 
       {/* Footer info */}
       <div className="hidden lg:block p-6 border-t border-slate-800 text-center">
-        <p className="text-[10px] text-slate-500 font-mono">IB Learner Profile v1.5</p>
+        <p className="text-[10px] text-slate-500 font-mono">IB Learner Profile v2.0 beta</p>
         <p className="text-[9px] text-slate-600 mt-0.5">Designed for Elementary Grade 5</p>
       </div>
     </aside>

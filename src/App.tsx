@@ -1,3 +1,4 @@
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { PortfolioProvider, usePortfolio } from './state/PortfolioContext';
 import Confetti from './components/Confetti';
 import Sidebar from './components/layout/Sidebar';
@@ -50,7 +51,29 @@ function AppLayout() {
   );
 }
 
+// 교사용·관리자용 화면은 학생 화면과 따로 내려받음 (학생 기기에는 필요 없음)
+const TeacherApp = lazy(() => import('./teacher/TeacherApp'));
+const AdminApp = lazy(() => import('./admin/AdminApp'));
+
+const routeOf = () => (location.hash === '#teacher' ? 'teacher' : location.hash === '#admin' ? 'admin' : 'student');
+
 export default function App() {
+  // 주소 끝이 #teacher 이면 교사용, #admin 이면 관리자용 화면
+  const [route, setRoute] = useState(routeOf);
+  useEffect(() => {
+    const onHash = () => setRoute(routeOf());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  if (route !== 'student') {
+    return (
+      <Suspense fallback={<div className="min-h-dvh flex items-center justify-center text-sm font-bold text-slate-500">불러오는 중…</div>}>
+        {route === 'teacher' ? <TeacherApp /> : <AdminApp />}
+      </Suspense>
+    );
+  }
+
   return (
     <PortfolioProvider>
       <AppLayout />

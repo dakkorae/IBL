@@ -20,11 +20,21 @@ PC·태블릿·휴대폰 화면 크기에 맞춰 배치가 바뀌는 반응형 �
 
 ## 데이터 저장 방식
 
-모든 기록은 **사용하는 기기의 브라우저(localStorage)** 에만 저장됩니다. 서버로 전송되지 않으며, 다른 기기나 다른 브라우저에서는 보이지 않습니다. 기기를 옮길 때는 환경 설정의 백업 기능을 이용하세요.
+- **기본**: 모든 기록은 사용하는 기기의 브라우저(localStorage)에 저장됩니다.
+- **학급 참여 시**: 환경 설정 → 학급 참여에서 학급 코드로 들어오면 기록이 학급 서버(Firebase)에도 저장되어, 다른 기기에서 이어 쓰고 교사가 학급 현황을 볼 수 있습니다. 이메일·이름 없이 학급 코드 + 번호 + 숫자 4자리 비밀번호로 들어옵니다.
+
+## 학급 운영 (교사용)
+
+| 주소 | 용도 |
+|---|---|
+| `#admin` | 관리자: 학급 개설 코드 발급 |
+| `#teacher` | 교사: 학급 개설, 학급 현황(전체 레이더·제출 현황·살펴볼 학생), 학생별 기록, 명단·비밀번호 관리, 학급 삭제 |
+
+서버 연결 방법은 [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md), 보안 규칙은 [firestore.rules](firestore.rules)를 보세요. `VITE_CLOUD_DEMO=1` 로 빌드하면 서버 없이 화면을 살펴볼 수 있는 체험용으로 동작합니다.
 
 ## 기술 스택
 
-React 19 · TypeScript · Vite 6 · Tailwind CSS 4 · motion · lucide-react
+React 19 · TypeScript · Vite 6 · Tailwind CSS 4 · motion · lucide-react · Firebase(Firestore, 익명 로그인)
 
 ## 실행 방법
 
@@ -46,7 +56,10 @@ src/
 ├── types.ts                 데이터 형식 정의
 ├── data.ts                  학습자상 정의, 날짜·공휴일, 통계 계산
 ├── badges.ts                배지 62개 정의와 획득 조건 판정
-├── theme.ts                 화면 테마 설정 (색상 · 글꼴 · 글자 크기)
+├── cloud/                   학급 서버 연결 (Firebase 구현 · 체험용 구현)
+├── teacher/                 교사용 페이지
+├── admin/                   관리자 페이지 (개설 코드)
+├── theme.ts                 화면 테마 설정, 학급 운영 1단계(학급 개설·참여·교사용 페이지) (색상 · 글꼴 · 글자 크기)
 ├── styles/themes.css        색상 테마별 색표
 ├── missionsData.ts          실천 미션 1,000개
 ├── state/
@@ -71,4 +84,4 @@ src/
 ## 이력
 
 - 2026.07 ~ 09: Google AI Studio로 최초 제작 ([IB-learner](https://github.com/dakkorae/IB-learner))
-- 2026.11: 이 저장소로 옮겨 Claude Code로 개선 시작 — 화면별 파일 분리, 사용하지 않는 AI Studio·Gemini 관련 코드 정리, 미션 1,000개 새로 구성, 실천 기록 필수화, 반응형 화면, 배지 62개 새로 설계, 화면 테마 설정
+- 2026.11: 이 저장소로 옮겨 Claude Code로 개선 시작 — 화면별 파일 분리, 사용하지 않는 AI Studio·Gemini 관련 코드 정리, 미션 1,000개 새로 구성, 실천 기록 필수화, 반응형 화면, 배지 62개 새로 설계, 화면 테마 설정, 학급 운영 1단계(학급 개설·참여·교사용 페이지)

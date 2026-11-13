@@ -1,0 +1,139 @@
+rules_version = '2';
+
+// IB 학습자상 포트폴리오 – 학급 운영용 보안 규칙
+// Firebase 콘솔 > Firestore Database > 규칙 탭에 이 파일 내용을 그대로 붙여 넣고 '게시'합니다.
+//
+// 원칙
+// - 모든 기기는 익명 로그인(개인정보 없음)으로 고유 ID(uid)만 가짐
+// - 비밀번호(관리자 키·교사 비밀번호·학생 비밀번호)는 해시값만 저장하고, 그 문서는 누구도 읽을 수 없음
+// - "비밀번호를 아는 기기"만 자기 uid로 등록 문서(admins / teachers / members)를 만들 수 있고,
+//   그 등록 문서가 있어야 해당 권한으로 읽고 쓸 수 있음
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(db)/documents/admins/$(request.auth.uid));
+    }
+    function isTeacher(cid) {
+      return signedIn() && exists(/databases/$(db)/documents/classes/$(cid)/teachers/$(request.auth.uid));
+    }
+    // 이 기기가 학급 cid의 학생 sid로 등록되어 있고, 그 뒤로 비밀번호가 초기화되지 않았는지
+    function isStudent(cid, sid) {
+      let member = get(/databases/$(db)/documents/classes/$(cid)/members/$(request.auth.uid));
+      return signedIn()
+        && member != null
+        && member.data.sid == sid
+        && member.data.pinHash == get(/databases/$(db)/documents/classes/$(cid)/pins/$(sid)).data.pinHash;
+    }
+    // 같은 묶음 쓰기(처음 입장)로 방금 등록되는 경우까지 포함
+    function isStudentAfter(cid, sid) {
+      let member = getAfter(/databases/$(db)/documents/classes/$(cid)/members/$(request.auth.uid));
+      return signedIn()
+        && member != null
+        && member.data.sid == sid
+        && member.data.pinHash == getAfter(/databases/$(db)/documents/classes/$(cid)/pins/$(sid)).data.pinHash;
+    }
+
+    // ---------- 관리자 ----------
+    // config/admin { keyHash } 는 콘솔에서 직접 한 번 만들어 둠. 앱에서는 읽지도 쓰지도 못함
+    match /config/{docId} {
+      allow read, write: if false;
+    }
+    match /admins/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['keyHash'])
+        && request.resource.data.keyHash == get(/databases/$(db)/documents/config/admin).data.keyHash;
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    // ---------- 개설 코드 ----------
+    match /inviteCodes/{code} {
+      allow get: if signedIn(); // 코드를 정확히 아는 사람만 조회 가능 (목록 조회는 관리자만)
+      allow list, create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (signedIn()
+            && resource.data.active == true
+            && resource.data.usedCount < resource.data.maxClasses
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount'])
+            && request.resource.data.usedCount == resource.data.usedCount + 1);
+    }
+
+    // ---------- 학급 ----------
+    match /classes/{cid} {
+      allow get: if signedIn(); // 학급 코드를 아는 사람만 조회 가능
+      allow list: if isAdmin();
+      // 개설: 유효한 개설 코드가 있어야 하고, 같은 묶음에서 그 코드의 사용 횟수를 1 올려야 함
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'inviteCode', 'createdAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 40
+        && get(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.active == true
+        && get(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.usedCount
+           < get(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.maxClasses
+        && getAfter(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.usedCount
+           == get(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.usedCount + 1
+        && existsAfter(/databases/$(db)/documents/classes/$(cid)/teachers/$(request.auth.uid));
+      allow update: if isTeacher(cid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 40;
+      allow delete: if isTeacher(cid) || isAdmin();
+
+      // 교사 비밀번호 해시: 학급을 만드는 묶음에서만 생성, 아무도 읽지 못함
+      match /secrets/{docId} {
+        allow read, update: if false;
+        allow create: if signedIn() && docId == 'teacher'
+          && !exists(/databases/$(db)/documents/classes/$(cid))
+          && existsAfter(/databases/$(db)/documents/classes/$(cid));
+        allow delete: if isTeacher(cid);
+      }
+      // 교사로 등록된 기기: 교사 비밀번호 해시가 일치해야 만들 수 있음
+      match /teachers/{uid} {
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow list: if isTeacher(cid);
+        allow create, update: if signedIn() && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['keyHash'])
+          && request.resource.data.keyHash
+             == getAfter(/databases/$(db)/documents/classes/$(cid)/secrets/teacher).data.keyHash;
+        allow delete: if isTeacher(cid);
+      }
+
+      // 학생 명단 (번호·별명만): 학급 코드를 아는 사람은 볼 수 있음
+      match /students/{sid} {
+        allow read: if signedIn();
+        allow create, delete: if isTeacher(cid);
+        allow update: if isTeacher(cid)
+          || (isStudentAfter(cid, sid)
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claimed'])
+              && request.resource.data.claimed == true);
+      }
+      // 학생 비밀번호 해시: 아직 없을 때 한 번만 만들 수 있고, 교사만 지울(초기화) 수 있음
+      match /pins/{sid} {
+        allow read, update: if false;
+        allow create: if signedIn()
+          && exists(/databases/$(db)/documents/classes/$(cid)/students/$(sid))
+          && request.resource.data.keys().hasOnly(['pinHash']);
+        allow delete: if isTeacher(cid);
+      }
+      // 학생으로 등록된 기기: 비밀번호 해시가 일치해야 만들 수 있음
+      match /members/{uid} {
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow list: if isTeacher(cid);
+        allow create, update: if signedIn() && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['sid', 'pinHash'])
+          && request.resource.data.pinHash
+             == getAfter(/databases/$(db)/documents/classes/$(cid)/pins/$(request.resource.data.sid)).data.pinHash;
+        allow delete: if (signedIn() && request.auth.uid == uid) || isTeacher(cid);
+      }
+      // 학생별 실천 기록: 본인과 교사만 읽고, 본인만 씀
+      match /portfolios/{sid} {
+        allow get: if isTeacher(cid) || isStudent(cid, sid);
+        allow list: if isTeacher(cid);
+        allow create, update: if isStudent(cid, sid);
+        allow delete: if isTeacher(cid);
+      }
+    }
+  }
+}

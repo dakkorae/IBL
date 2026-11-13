@@ -13,9 +13,11 @@ interface RadarChartProps {
     emoji: string;
   }[];
   maxSubmittedDays: number;
+  title?: string;
+  subtitle?: string;
 }
 
-export default function RadarChart({ data, maxSubmittedDays }: RadarChartProps) {
+export default function RadarChart({ data, maxSubmittedDays, title = '10대 학습자상 레이더', subtitle = '나의 다각적 역량 밸런스' }: RadarChartProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   const size = 480;
@@ -86,8 +88,8 @@ export default function RadarChart({ data, maxSubmittedDays }: RadarChartProps) 
   return (
     <div className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden">
       <div className="text-center mb-2">
-        <h3 className="text-lg font-bold text-slate-800">10대 학습자상 레이더</h3>
-        <p className="text-xs text-slate-400">나의 다각적 역량 밸런스</p>
+        <h3 className="text-lg font-bold text-slate-800">{title}</h3>
+        <p className="text-xs text-slate-400">{subtitle}</p>
       </div>
 
       <div className="w-full max-w-[540px] aspect-[610/430] relative">

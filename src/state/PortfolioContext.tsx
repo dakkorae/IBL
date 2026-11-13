@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { LearnerProfileKey, DailyRecord, ViewType, TimePeriod, Reflection, BadgeStatus } from '../types';
-import { PROFILE_DATA, generateMockHistory, calculateStats, getLocalDateString, parseDateString, getMissionForDay, getRandomMission, reconstructHistoryFromShared } from '../data';
+import { PROFILE_DATA, generateMockHistory, calculateStats, getLocalDateString, parseDateString, getMissionForDay, getDefaultMissionForDay, getRandomMission, reconstructHistoryFromShared } from '../data';
 import { evaluateBadges } from '../badges';
 import { getDailyDrafts, saveDailyDraft, clearDailyDraft } from '../storage/drafts';
+import { getBackend, loadClassSession, saveClassSession } from '../cloud';
+import { ClassSession, CloudRecord } from '../cloud/types';
 
 export const MIN_REFLECTION_LENGTH = 5;
 const emptyReflection = (): Reflection => ({ profileKey: null, text: '' });
@@ -538,6 +540,7 @@ function usePortfolioState() {
     setSubmittedToday(true);
     setIsEditingToday(false);
     clearDailyDraft(selectedDate); // Clear draft since formally submitted
+    pushToClass([newRecord]);
 
     if (newlyUnlocked.length > 0) {
       setNewlyUnlockedBadges(newlyUnlocked);
@@ -557,7 +560,7 @@ function usePortfolioState() {
 
   // Reset entire application data
   const handleResetData = () => {
-    if (isShareMode) return;
+    if (isShareMode || blockedWhileInClass()) return;
     if (confirm('정말로 모든 포트폴리오 데이터를 초기화하시겠습니까?\n초기화 후에는 모든 실천 기록이 지워지고 처음부터 기록을 시작하게 됩니다.')) {
       const emptyHistory: DailyRecord[] = [];
       localStorage.setItem('ib_portfolio_history', JSON.stringify(emptyHistory));
@@ -578,7 +581,7 @@ function usePortfolioState() {
 
   // Load 365-day sample demo data for preview
   const handleLoadSampleData = () => {
-    if (isShareMode) return;
+    if (isShareMode || blockedWhileInClass()) return;
     if (confirm('365일치 샘플 실천 데이터를 불러오시겠습니까?\n현재 저장된 실천 기록이 샘플 데이터로 대체됩니다.')) {
       const sample = generateMockHistory();
       localStorage.setItem('ib_portfolio_history', JSON.stringify(sample));
@@ -653,6 +656,10 @@ function usePortfolioState() {
 
   // Import, validate and restore portfolio history from JSON file
   const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (blockedWhileInClass()) {
+      e.target.value = '';
+      return;
+    }
     if (isShareMode) {
       alert('공유 모드에서는 데이터를 가져올 수 없습니다.');
       return;
@@ -708,6 +715,157 @@ function usePortfolioState() {
   // Count total historical completed missions across all records
   const totalMissionsCount = history.reduce((sum, r) => sum + r.completed.length, 0);
 
+  // =====================================================================
+  // 학급 연결: 기록은 지금처럼 이 기기에 먼저 저장하고, 학급에 참여 중이면 서버에도 올림
+  // =====================================================================
+  const [classSession, setClassSession] = useState<ClassSession | null>(loadClassSession);
+  const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'error'>('idle');
+
+  const blockedWhileInClass = () => {
+    if (!classSession) return false;
+    showToast('⚠️ 학급에 참여 중일 때는 사용할 수 없어요. 학급에서 나간 뒤 다시 시도해 주세요.', 'warning');
+    return true;
+  };
+
+  // 기기 기록 → 서버 기록 (그날 실천한 미션 문장과 바꾼 횟수를 함께 담음)
+  const toCloudRecord = (r: DailyRecord): CloudRecord => {
+    const missions: Partial<Record<LearnerProfileKey, string>> = {};
+    if (!r.reflectionOnly) {
+      r.completed.forEach((k) => {
+        missions[k] = getMissionForDay(k, r.date, customMissionsByDate[r.date] as Record<string, string> | undefined);
+      });
+    }
+    const rerolls = rerollCountsByDate[r.date];
+    return { ...r, missions, ...(rerolls && Object.keys(rerolls).length ? { rerolls } : {}), updatedAt: Date.now() };
+  };
+
+  const PENDING_KEY = 'ib_cloud_pending';
+  const loadPending = (): string[] => {
+    try {
+      return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]');
+    } catch {
+      return [];
+    }
+  };
+
+  // 서버에 올리기. 실패하면 날짜를 적어 두었다가 다음에 다시 올림
+  const pushToClass = async (records: DailyRecord[], session: ClassSession | null = classSession): Promise<boolean> => {
+    if (!session || records.length === 0) return true;
+    const dates = records.map((r) => r.date);
+    setSyncState('syncing');
+    try {
+      const backend = await getBackend();
+      await backend.saveRecords(session.classId, session.sid, records.map(toCloudRecord));
+      localStorage.setItem(PENDING_KEY, JSON.stringify(loadPending().filter((d) => !dates.includes(d))));
+      setSyncState('idle');
+      return true;
+    } catch (e) {
+      console.error('학급 서버 저장 실패', e);
+      localStorage.setItem(PENDING_KEY, JSON.stringify([...new Set([...loadPending(), ...dates])]));
+      setSyncState('error');
+      showToast('⚠️ 학급 서버에 저장하지 못했어요. 기록은 이 기기에 남아 있고, 다음에 다시 올릴게요.', 'warning');
+      return false;
+    }
+  };
+
+  // 서버 기록을 이 기기에 그대로 반영
+  const applyCloudRecords = (records: CloudRecord[]) => {
+    const nextCustom: Record<string, Partial<Record<LearnerProfileKey, string>>> = {};
+    const nextRerolls: Record<string, Partial<Record<LearnerProfileKey, number>>> = {};
+    const nextHistory: DailyRecord[] = records
+      .map((rec) => {
+        const { missions, rerolls, updatedAt, ...daily } = rec;
+        void updatedAt;
+        const changed = Object.entries(missions || {}).filter(
+          ([k, text]) => text && text !== getDefaultMissionForDay(k as LearnerProfileKey, rec.date)
+        );
+        if (changed.length) nextCustom[rec.date] = Object.fromEntries(changed);
+        if (rerolls) nextRerolls[rec.date] = rerolls;
+        return daily as DailyRecord;
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    // 아직 제출하지 않은 날짜에서 바꿔 둔 미션은 그대로 둠
+    const submittedDates = new Set(nextHistory.map((r) => r.date));
+    Object.entries(customMissionsByDate).forEach(([d, v]) => {
+      if (!submittedDates.has(d)) nextCustom[d] = v;
+    });
+    Object.entries(rerollCountsByDate).forEach(([d, v]) => {
+      if (!submittedDates.has(d)) nextRerolls[d] = v;
+    });
+
+    localStorage.setItem('ib_portfolio_history', JSON.stringify(nextHistory));
+    localStorage.setItem('ib_has_reset', 'true');
+    localStorage.setItem('ib_custom_missions_by_date', JSON.stringify(nextCustom));
+    localStorage.setItem('ib_reroll_counts_by_date', JSON.stringify(nextRerolls));
+    setHistory(nextHistory);
+    setCustomMissionsByDate(nextCustom);
+    setRerollCountsByDate(nextRerolls);
+  };
+
+  // 학급 참여를 마무리 (설정 화면의 학급 참여 카드에서 호출)
+  // - 'pull': 서버에 있는 기록을 이 기기로 가져옴
+  // - 'push': 이 기기의 기록을 서버에 올림
+  // - 'fresh': 빈 기록으로 새로 시작
+  const connectClass = async (session: ClassSession, mode: 'pull' | 'push' | 'fresh', cloudRecords: CloudRecord[] = []) => {
+    if (mode === 'pull') applyCloudRecords(cloudRecords);
+    if (mode === 'fresh') applyCloudRecords([]);
+    if (mode === 'push') {
+      const ok = await pushToClass(history.filter((r) => r.submitted), session);
+      if (!ok) throw new Error('이 기기의 기록을 학급에 올리지 못했어요. 잠시 후 다시 시도해 주세요.');
+      localStorage.setItem('ib_has_reset', 'true');
+    }
+    saveClassSession(session);
+    setClassSession(session);
+    const nextUser = { ...userInfo, name: session.nickname, school: session.className };
+    setUserInfo(nextUser);
+    localStorage.setItem('ib_user_info', JSON.stringify(nextUser));
+  };
+
+  const disconnectClass = async () => {
+    const session = classSession;
+    saveClassSession(null);
+    setClassSession(null);
+    localStorage.removeItem(PENDING_KEY);
+    setSyncState('idle');
+    if (session) {
+      try {
+        await (await getBackend()).leaveClass(session.classId);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
+
+  // 앱을 열 때: 못 올린 기록을 먼저 올리고, 서버 기록(다른 기기에서 쓴 것 포함)을 가져옴
+  useEffect(() => {
+    if (!classSession || isShareMode) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const pending = loadPending();
+        if (pending.length > 0) {
+          const ok = await pushToClass(history.filter((r) => pending.includes(r.date)));
+          if (!ok) return;
+        }
+        const backend = await getBackend();
+        setSyncState('syncing');
+        const records = await backend.getPortfolio(classSession.classId, classSession.sid);
+        if (cancelled) return;
+        applyCloudRecords(records);
+        setSyncState('idle');
+      } catch (e) {
+        console.error('학급 서버 동기화 실패', e);
+        if (!cancelled) setSyncState('error');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classSession?.classId, classSession?.sid]);
+
+
   return {
     calendarViewMonth,
     calendarViewYear,
@@ -715,6 +873,10 @@ function usePortfolioState() {
     customMissionsByDate,
     expandedProfileKey,
     badgeStatuses,
+    classSession,
+    connectClass,
+    disconnectClass,
+    syncState,
     unlockedBadgeCount,
     getFormattedDate,
     handleEnableEdit,
