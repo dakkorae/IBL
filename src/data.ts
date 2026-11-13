@@ -321,7 +321,7 @@ export function generateMockHistory(baseDate: Date = new Date()): DailyRecord[] 
       date: pastDate,
       completed: shuffled.slice(0, count),
       submitted: true,
-      memo: mockMemos[i % mockMemos.length]
+      reflections: [{ profileKey: shuffled[0], text: mockMemos[i % mockMemos.length] }]
     });
   }
 

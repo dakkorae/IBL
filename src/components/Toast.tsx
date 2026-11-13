@@ -17,7 +17,7 @@ export default function Toast() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 20, scale: 0.95 }}
           transition={{ duration: 0.2 }}
-          className="fixed bottom-6 right-6 z-50 max-w-md pointer-events-auto"
+          className="fixed top-3 md:top-auto md:bottom-6 left-3 right-3 sm:left-auto sm:right-6 z-50 sm:max-w-md pointer-events-auto"
         >
           <div className={`p-4 rounded-2xl shadow-xl border flex items-center space-x-3 backdrop-blur-md ${
             toastMessage.type === 'success'

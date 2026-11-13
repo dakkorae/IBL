@@ -90,9 +90,9 @@ export default function RadarChart({ data, maxSubmittedDays }: RadarChartProps) 
         <p className="text-xs text-slate-400">나의 다각적 역량 밸런스</p>
       </div>
 
-      <div className="w-full max-w-[420px] aspect-square relative">
+      <div className="w-full max-w-[540px] aspect-[610/430] relative">
         <svg
-          viewBox={`0 0 ${size} ${size}`}
+          viewBox={`-65 45 ${size + 130} 430`}
           className="w-full h-full overflow-visible select-none"
         >
           {/* Gradients */}
@@ -218,14 +218,14 @@ export default function RadarChart({ data, maxSubmittedDays }: RadarChartProps) 
                   textAnchor={anchor}
                   className={`transition-all duration-150 ${isHovered ? 'scale-110 font-bold' : ''}`}
                 >
-                  <tspan className="text-sm font-semibold fill-slate-700">
+                  <tspan className="text-[18px] sm:text-sm font-semibold fill-slate-700">
                     {item.emoji} {item.name}
                   </tspan>
                   <tspan
                     x={tipX + offset.dx}
                     dy="14"
                     textAnchor={anchor}
-                    className="text-[9px] fill-slate-400 font-mono"
+                    className="text-[12px] sm:text-[9px] fill-slate-400 font-mono"
                   >
                     {item.englishName} ({item.value}회)
                   </tspan>
@@ -247,7 +247,7 @@ export default function RadarChart({ data, maxSubmittedDays }: RadarChartProps) 
               </div>
             </div>
           ) : (
-            <p className="text-[10px] text-slate-300 select-none">레이더 꼭짓점에 마우스를 올리면 상세 기록이 보여요!</p>
+            <p className="text-[10px] text-slate-300 select-none">꼭짓점을 누르거나 마우스를 올리면 상세 기록이 보여요!</p>
           )}
         </div>
       </div>

@@ -1,7 +1,23 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { LearnerProfileKey, DailyRecord, ViewType, TimePeriod, Badge } from '../types';
+import { LearnerProfileKey, DailyRecord, ViewType, TimePeriod, Badge, Reflection } from '../types';
 import { PROFILE_DATA, generateMockHistory, calculateStats, getLocalDateString, parseDateString, getMissionForDay, getRandomMission, getBadgesList, reconstructHistoryFromShared } from '../data';
 import { getDailyDrafts, saveDailyDraft, clearDailyDraft } from '../storage/drafts';
+
+export const MIN_REFLECTION_LENGTH = 5;
+const emptyReflection = (): Reflection => ({ profileKey: null, text: '' });
+
+// 저장된 기록을 입력 칸에 다시 불러올 때 쓰는 변환 (예전 자유 메모도 한 줄로 보여 줌)
+const recordToReflections = (rec: DailyRecord): Reflection[] => {
+  if (Array.isArray(rec.reflections) && rec.reflections.length > 0) return rec.reflections;
+  if (rec.memo) return [{ profileKey: null, text: rec.memo }];
+  return [emptyReflection()];
+};
+const recordToSelected = (rec: DailyRecord): LearnerProfileKey[] => (rec.reflectionOnly ? [] : rec.completed || []);
+const draftToReflections = (draft: { memo?: string; reflections?: Reflection[] } | undefined): Reflection[] => {
+  if (draft && Array.isArray(draft.reflections) && draft.reflections.length > 0) return draft.reflections;
+  if (draft && typeof draft.memo === 'string' && draft.memo) return [{ profileKey: null, text: draft.memo }];
+  return [emptyReflection()];
+};
 
 // 앱 전체가 함께 쓰는 상태(기록, 학생 정보, 선택 날짜 등)와 동작(제출, 백업, 공유 등)을 모아 둔 곳.
 // 각 화면은 usePortfolio()로 필요한 값만 꺼내 씁니다.
@@ -101,7 +117,7 @@ function usePortfolioState() {
       if (storedHist) {
         const hist: DailyRecord[] = JSON.parse(storedHist);
         const rec = hist.find((r) => r.date === initDate);
-        if (rec && rec.submitted) return rec.completed || [];
+        if (rec && rec.submitted) return recordToSelected(rec);
       }
       const rawDrafts = localStorage.getItem('ib_daily_drafts');
       if (rawDrafts) {
@@ -116,26 +132,24 @@ function usePortfolioState() {
     return [];
   });
 
-  const [memoText, setMemoText] = useState<string>(() => {
+  const [reflections, setReflections] = useState<Reflection[]>(() => {
     try {
       const initDate = localStorage.getItem('ib_selected_date') || getLocalDateString();
       const storedHist = localStorage.getItem('ib_portfolio_history');
       if (storedHist) {
         const hist: DailyRecord[] = JSON.parse(storedHist);
         const rec = hist.find((r) => r.date === initDate);
-        if (rec && rec.submitted) return rec.memo || '';
+        if (rec && rec.submitted) return recordToReflections(rec);
       }
       const rawDrafts = localStorage.getItem('ib_daily_drafts');
       if (rawDrafts) {
         const drafts = JSON.parse(rawDrafts);
-        if (drafts[initDate] && typeof drafts[initDate].memo === 'string') {
-          return drafts[initDate].memo;
-        }
+        return draftToReflections(drafts[initDate]);
       }
     } catch (e) {
       console.error(e);
     }
-    return '';
+    return [emptyReflection()];
   });
 
   const [submittedToday, setSubmittedToday] = useState<boolean>(() => {
@@ -358,10 +372,10 @@ function usePortfolioState() {
       // If user was in edit mode and has draft edits, prioritize draft edits
       if (isEditingToday && draft) {
         setSelectedMissions(draft.completed || []);
-        setMemoText(draft.memo || '');
+        setReflections(draftToReflections(draft));
       } else {
-        setSelectedMissions(record.completed || []);
-        setMemoText(record.memo || '');
+        setSelectedMissions(recordToSelected(record));
+        setReflections(recordToReflections(record));
         setIsEditingToday(false);
       }
     } else {
@@ -370,10 +384,10 @@ function usePortfolioState() {
       // If not submitted yet, restore draft if user previously inputted selections or memo
       if (draft) {
         setSelectedMissions(draft.completed || []);
-        setMemoText(draft.memo || '');
+        setReflections(draftToReflections(draft));
       } else {
         setSelectedMissions([]);
-        setMemoText('');
+        setReflections([emptyReflection()]);
       }
     }
   }, [selectedDate, history]);
@@ -435,30 +449,81 @@ function usePortfolioState() {
     if (isShareMode) return; // Prevent modification in share mode
     if (submittedToday && !isEditingToday) return; // Prevent modification if submitted & not editing
 
-    setSelectedMissions((prev) => {
-      const updated = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
-      saveDailyDraft(selectedDate, updated, memoText);
-      return updated;
-    });
+    const updated = selectedMissions.includes(key)
+      ? selectedMissions.filter((k) => k !== key)
+      : [...selectedMissions, key];
+    // 체크를 푼 미션을 고른 기록 줄은 미션을 다시 고르도록 비워 둔다
+    const nextReflections = reflections.map((r) =>
+      r.profileKey && !updated.includes(r.profileKey) ? { ...r, profileKey: null } : r
+    );
+    setSelectedMissions(updated);
+    setReflections(nextReflections);
+    saveDailyDraft(selectedDate, updated, nextReflections);
   };
 
-  // Handle memo text change with immediate draft persistence
-  const handleMemoChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    setMemoText(val);
-    saveDailyDraft(selectedDate, selectedMissions, val);
+  // --- 실천 기록(한 줄 기록) 입력 ---
+  const canEditReflections = !isShareMode && !(submittedToday && !isEditingToday);
+
+  const updateReflections = (next: Reflection[]) => {
+    setReflections(next);
+    saveDailyDraft(selectedDate, selectedMissions, next);
   };
+
+  const handleReflectionChange = (index: number, patch: Partial<Reflection>) => {
+    if (!canEditReflections) return;
+    updateReflections(reflections.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  };
+
+  const handleAddReflection = () => {
+    if (!canEditReflections) return;
+    updateReflections([...reflections, emptyReflection()]);
+  };
+
+  const handleRemoveReflection = (index: number) => {
+    if (!canEditReflections || reflections.length <= 1) return;
+    updateReflections(reflections.filter((_, i) => i !== index));
+  };
+
+  // 체크한 미션이 하나도 없는 날: 미션 선택 없이 성찰 한 줄만 쓰면 저장되고 '성찰하는 사람' +1
+  const isReflectionOnlyMode = selectedMissions.length === 0;
+  const countChars = (text: string) => text.replace(/\s/g, '').length;
+  const filledReflections = reflections.filter((r) => r.text.trim().length > 0 || (!isReflectionOnlyMode && r.profileKey));
+
+  // 제출을 막는 이유 (없으면 null)
+  const reflectionError: string | null = (() => {
+    if (filledReflections.length === 0) {
+      return isReflectionOnlyMode
+        ? '오늘 실천하지 못한 까닭이나 내일의 다짐을 한 줄 써 주세요.'
+        : '체크한 미션 중 하나를 골라 실천한 내용을 한 줄 써 주세요.';
+    }
+    for (const r of filledReflections) {
+      if (!isReflectionOnlyMode && !r.profileKey) return '어떤 미션에 대한 기록인지 골라 주세요.';
+      if (countChars(r.text) < MIN_REFLECTION_LENGTH) return `실천 기록은 ${MIN_REFLECTION_LENGTH}글자 이상 써 주세요.`;
+    }
+    return null;
+  })();
 
   // Submit daily checklist
   const handleSubmitDaily = (e: React.FormEvent) => {
     e.preventDefault();
     if (isShareMode) return;
 
+    if (reflectionError) {
+      showToast(`⚠️ ${reflectionError}`, 'warning');
+      return;
+    }
+
+    const savedReflections: Reflection[] = filledReflections.map((r) => ({
+      profileKey: isReflectionOnlyMode ? null : r.profileKey,
+      text: r.text.trim()
+    }));
+
     const newRecord: DailyRecord = {
       date: selectedDate,
-      completed: selectedMissions,
+      completed: isReflectionOnlyMode ? ['Reflective'] : selectedMissions,
       submitted: true,
-      memo: memoText.trim()
+      reflections: savedReflections,
+      ...(isReflectionOnlyMode ? { reflectionOnly: true } : {})
     };
 
     // Filter out existing record if any, and add the new one
@@ -497,7 +562,7 @@ function usePortfolioState() {
   const handleEnableEdit = () => {
     if (isShareMode) return;
     setIsEditingToday(true);
-    saveDailyDraft(selectedDate, selectedMissions, memoText);
+    saveDailyDraft(selectedDate, selectedMissions, reflections);
   };
 
   // Reset entire application data
@@ -512,7 +577,7 @@ function usePortfolioState() {
       localStorage.removeItem('ib_reroll_counts_by_date');
       setHistory(emptyHistory);
       setSelectedMissions([]);
-      setMemoText('');
+      setReflections([emptyReflection()]);
       setSubmittedToday(false);
       setIsEditingToday(false);
       setCustomMissionsByDate({});
@@ -665,7 +730,11 @@ function usePortfolioState() {
     handleExportData,
     handleImportData,
     handleLoadSampleData,
-    handleMemoChange,
+    handleReflectionChange,
+    handleAddReflection,
+    handleRemoveReflection,
+    reflectionError,
+    isReflectionOnlyMode,
     handleNextDate,
     handlePrevDate,
     handleRerollMission,
@@ -678,7 +747,7 @@ function usePortfolioState() {
     isCalendarOpen,
     isEditingToday,
     isShareMode,
-    memoText,
+    reflections,
     newlyUnlockedBadges,
     recentlyRerolledKey,
     rerollCountsByDate,
@@ -693,7 +762,7 @@ function usePortfolioState() {
     setIsCalendarOpen,
     setIsEditingToday,
     setIsShareMode,
-    setMemoText,
+    setReflections,
     setNewlyUnlockedBadges,
     setRecentlyRerolledKey,
     setRerollCountsByDate,

@@ -3,6 +3,7 @@ import Confetti from './components/Confetti';
 import Sidebar from './components/layout/Sidebar';
 import ShareModeBanner from './components/layout/ShareModeBanner';
 import Header from './components/layout/Header';
+import BottomNav from './components/layout/BottomNav';
 import DashboardView from './views/DashboardView';
 import MissionView from './views/MissionView';
 import ProfilesView from './views/ProfilesView';
@@ -18,19 +19,19 @@ function AppLayout() {
   const { currentView, showCelebrateModal } = usePortfolio();
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans flex flex-col md:flex-row text-slate-800">
+    <div className="min-h-dvh bg-slate-50 font-sans flex text-slate-800">
       {/* Confetti celebration */}
       <Confetti active={showCelebrateModal} />
 
       <Sidebar />
 
       {/* --- MAIN WORKSPACE --- */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+      <main className="flex-1 flex flex-col min-w-0 pb-20 md:pb-0">
         <ShareModeBanner />
         <Header />
 
         {/* Content Area */}
-        <div className="p-6 max-w-7xl w-full mx-auto space-y-6">
+        <div className="p-3 sm:p-6 max-w-7xl w-full mx-auto space-y-6">
           {currentView === 'dashboard' && <DashboardView />}
           {currentView === 'mission' && <MissionView />}
           {currentView === 'profiles' && <ProfilesView />}
@@ -38,6 +39,8 @@ function AppLayout() {
           {currentView === 'settings' && <SettingsView />}
         </div>
       </main>
+
+      <BottomNav />
 
       <CelebrateModal />
       <BadgeUnlockModal />

@@ -257,8 +257,26 @@ export default function DashboardView() {
                       })}
                     </div>
                   </div>
-                  {record.memo && (
-                    <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                  {record.reflectionOnly && (
+                    <span className="inline-block text-[10px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded-md">
+                      🪞 성찰 기록으로 +1
+                    </span>
+                  )}
+                  {(record.reflections || []).map((r, i) => {
+                    const prof = r.profileKey ? PROFILE_DATA.find((p) => p.key === r.profileKey) : null;
+                    return (
+                      <p key={i} className="text-xs text-slate-600 leading-relaxed font-medium break-words">
+                        {prof && (
+                          <span className={`inline-block mr-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${prof.bgColor} ${prof.textColor}`}>
+                            {prof.emoji} {prof.name}
+                          </span>
+                        )}
+                        {r.text}
+                      </p>
+                    );
+                  })}
+                  {!record.reflections?.length && record.memo && (
+                    <p className="text-xs text-slate-600 leading-relaxed font-medium break-words">
                       "{record.memo}"
                     </p>
                   )}
