@@ -1,6 +1,0 @@
-{
-  "name": "IB 학습자상 포트폴리오",
-  "description": "IB 초등학교 5학년 학생들을 위한 10가지 학습자상 실천 기록 및 성장 모니터링 대시보드",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
