@@ -57,8 +57,8 @@ export default function BadgeUnlockModal() {
 
               {/* Display Newly Unlocked Badges */}
               <div className="bg-white/5 border border-white/10 p-5 rounded-2xl text-center space-y-3">
-                <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">오늘 잠금해제된 배지</p>
-                <div className="space-y-4">
+                <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">새로 받은 배지 {newlyUnlockedBadges.length}개</p>
+                <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-1">
                   {newlyUnlockedBadges.map((badge) => (
                     <div key={badge.id} className="flex items-center space-x-3.5 text-left bg-indigo-900/30 border border-indigo-500/20 p-3.5 rounded-xl">
                       <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center text-3xl shrink-0 shadow-inner">

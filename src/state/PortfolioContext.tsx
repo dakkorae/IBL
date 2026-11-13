@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { LearnerProfileKey, DailyRecord, ViewType, TimePeriod, Badge, Reflection } from '../types';
-import { PROFILE_DATA, generateMockHistory, calculateStats, getLocalDateString, parseDateString, getMissionForDay, getRandomMission, getBadgesList, reconstructHistoryFromShared } from '../data';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { LearnerProfileKey, DailyRecord, ViewType, TimePeriod, Reflection, BadgeStatus } from '../types';
+import { PROFILE_DATA, generateMockHistory, calculateStats, getLocalDateString, parseDateString, getMissionForDay, getRandomMission, reconstructHistoryFromShared } from '../data';
+import { evaluateBadges } from '../badges';
 import { getDailyDrafts, saveDailyDraft, clearDailyDraft } from '../storage/drafts';
 
 export const MIN_REFLECTION_LENGTH = 5;
@@ -186,7 +187,7 @@ function usePortfolioState() {
   });
 
   // Badge Unlock States
-  const [newlyUnlockedBadges, setNewlyUnlockedBadges] = useState<Badge[]>([]);
+  const [newlyUnlockedBadges, setNewlyUnlockedBadges] = useState<BadgeStatus[]>([]);
   const [showBadgeUnlockModal, setShowBadgeUnlockModal] = useState(false);
 
   // Custom Assigned Missions per Date (when rerolled by user)
@@ -261,16 +262,12 @@ function usePortfolioState() {
     }
   }, [selectedDate, isCalendarOpen]);
 
-  // Helper to calculate badge progress
-  const getBadgeProgress = (badge: Badge, records: DailyRecord[]): number => {
-    if (badge.type === 'profile_count' && badge.profileKey) {
-      return records.reduce((sum, r) => sum + (r.completed.includes(badge.profileKey!) ? 1 : 0), 0);
-    }
-    if (badge.type === 'total_days') {
-      return records.filter((r) => r.submitted).length;
-    }
-    return 0;
-  };
+  // 배지 진행도와 획득 여부 (기록·미션 변경 내역이 바뀔 때마다 다시 계산)
+  const badgeStatuses = useMemo(
+    () => evaluateBadges(history, { customMissionsByDate, rerollCountsByDate }),
+    [history, customMissionsByDate, rerollCountsByDate]
+  );
+  const unlockedBadgeCount = badgeStatuses.filter((b) => b.unlocked).length;
 
   // Format selected date for display (e.g., 2026년 7월 14일 화요일)
   const getFormattedDate = () => {
@@ -523,6 +520,7 @@ function usePortfolioState() {
       completed: isReflectionOnlyMode ? ['Reflective'] : selectedMissions,
       submitted: true,
       reflections: savedReflections,
+      submittedAt: getLocalDateString(),
       ...(isReflectionOnlyMode ? { reflectionOnly: true } : {})
     };
 
@@ -530,18 +528,10 @@ function usePortfolioState() {
     const updatedHistory = history.filter((r) => r.date !== selectedDate);
     const finalHistory = [...updatedHistory, newRecord];
 
-    // Compute newly unlocked achievements before updating state
-    const previousBadges = getBadgesList(history);
-    const previousUnlockedIds = previousBadges
-      .filter((b) => getBadgeProgress(b, history) >= b.requiredCount)
-      .map((b) => b.id);
-
-    const currentBadges = getBadgesList(finalHistory);
-    const newlyUnlocked = currentBadges.filter((b) => {
-      const isNowUnlocked = getBadgeProgress(b, finalHistory) >= b.requiredCount;
-      const wasUnlockedBefore = previousUnlockedIds.includes(b.id);
-      return isNowUnlocked && !wasUnlockedBefore;
-    });
+    // 이번 제출로 새로 받은 배지 찾기
+    const badgeCtx = { customMissionsByDate, rerollCountsByDate };
+    const previousUnlockedIds = new Set(evaluateBadges(history, badgeCtx).filter((b) => b.unlocked).map((b) => b.id));
+    const newlyUnlocked = evaluateBadges(finalHistory, badgeCtx).filter((b) => b.unlocked && !previousUnlockedIds.has(b.id));
 
     localStorage.setItem('ib_portfolio_history', JSON.stringify(finalHistory));
     setHistory(finalHistory);
@@ -724,7 +714,8 @@ function usePortfolioState() {
     currentView,
     customMissionsByDate,
     expandedProfileKey,
-    getBadgeProgress,
+    badgeStatuses,
+    unlockedBadgeCount,
     getFormattedDate,
     handleEnableEdit,
     handleExportData,

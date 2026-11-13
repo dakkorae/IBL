@@ -1,5 +1,5 @@
 import { Trophy } from 'lucide-react';
-import { getBadgesList } from '../../data';
+import { TOTAL_BADGE_COUNT } from '../../badges';
 import { usePortfolio } from '../../state/PortfolioContext';
 import { NAV_ITEMS } from './navItems';
 
@@ -10,16 +10,13 @@ import { NAV_ITEMS } from './navItems';
 export default function Sidebar() {
   const {
     currentView,
-    getBadgeProgress,
-    history,
+    unlockedBadgeCount,
     selectedDate,
     setCurrentView,
     submittedToday,
     todayStr,
     userInfo
   } = usePortfolio();
-
-  const unlockedBadges = getBadgesList(history).filter((b) => getBadgeProgress(b, history) >= b.requiredCount).length;
 
   return (
     <aside className="hidden md:flex md:w-20 lg:w-64 md:sticky md:top-0 md:h-dvh bg-slate-900 text-slate-200 flex-col shrink-0 border-r border-slate-800 overflow-y-auto">
@@ -93,7 +90,7 @@ export default function Sidebar() {
               )}
               {view === 'badges' && (
                 <span className="hidden lg:inline text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full border border-yellow-500/30 font-bold">
-                  {unlockedBadges} / 56
+                  {unlockedBadgeCount} / {TOTAL_BADGE_COUNT}
                 </span>
               )}
             </button>
@@ -103,7 +100,7 @@ export default function Sidebar() {
 
       {/* Footer info */}
       <div className="hidden lg:block p-6 border-t border-slate-800 text-center">
-        <p className="text-[10px] text-slate-500 font-mono">IB Learner Profile v1.3</p>
+        <p className="text-[10px] text-slate-500 font-mono">IB Learner Profile v1.4</p>
         <p className="text-[9px] text-slate-600 mt-0.5">Designed for Elementary Grade 5</p>
       </div>
     </aside>

@@ -1,4 +1,4 @@
-import { ProfileDefinition, LearnerProfileKey, DailyRecord, TimePeriod, Badge } from './types';
+import { ProfileDefinition, LearnerProfileKey, DailyRecord, TimePeriod } from './types';
 import { IB_MISSIONS_1000 } from './missionsData';
 
 export { IB_MISSIONS_1000 };
@@ -423,81 +423,6 @@ export function calculateStats(history: DailyRecord[], period: TimePeriod, baseD
       ? (weekendHolidayActions / weekendHolidayRecords.length).toFixed(1)
       : '0'
   };
-}
-
-// Generate the beautiful Badge & Achievements list
-export function getBadgesList(history: DailyRecord[]): Badge[] {
-  const profileTotals: Record<LearnerProfileKey, number> = {} as any;
-  PROFILE_DATA.forEach((p) => {
-    profileTotals[p.key] = 0;
-  });
-
-  // Compute total counts for each profile
-  history.forEach((record) => {
-    record.completed.forEach((key) => {
-      if (profileTotals[key] !== undefined) {
-        profileTotals[key]++;
-      }
-    });
-  });
-
-  const totalDaysCount = history.filter((r) => r.submitted).length;
-
-  const badges: Badge[] = [];
-
-  // 1. Level-based badges for each of the 10 profiles (10 keys * 5 tiers = 50 badges)
-  const tierConfigs = [
-    { level: 1, requiredCount: 1, suffix: '새싹', emojiOverride: '🌱', desc: '해당 학습자상의 첫 실천을 훌륭히 마쳤습니다!' },
-    { level: 2, requiredCount: 5, suffix: '수호자', emojiOverride: '🧭', desc: '해당 영역에서 흔들림 없는 모범이 됩니다.' },
-    { level: 3, requiredCount: 15, suffix: '전도사', emojiOverride: '🔥', desc: '친구들에게 적극적으로 긍정 가치를 전파합니다.' },
-    { level: 4, requiredCount: 30, suffix: '전문가', emojiOverride: '🎓', desc: '학급 전원의 롤모델이자 주도적인 학습 리더입니다.' },
-    { level: 5, requiredCount: 50, suffix: '마스터', emojiOverride: '👑', desc: '해당 학습자상 분야의 최고 권위자 수준에 올랐습니다!' }
-  ];
-
-  PROFILE_DATA.forEach((profile) => {
-    tierConfigs.forEach((tier) => {
-      const id = `${profile.key}_L${tier.level}`;
-      const name = `${profile.name} ${tier.suffix}`;
-      const emoji = tier.level === 5 ? '👑' : profile.emoji;
-      const progress = profileTotals[profile.key];
-      const isUnlocked = progress >= tier.requiredCount;
-
-      badges.push({
-        id,
-        name,
-        emoji,
-        description: `진정으로 ${profile.name}으로서의 모습을 갖춰가고 있습니다. ${tier.desc}`,
-        requirementDescription: `${profile.name} ${tier.requiredCount}회 실천 (현재: ${progress}회)`,
-        profileKey: profile.key,
-        requiredCount: tier.requiredCount,
-        type: 'profile_count'
-      });
-    });
-  });
-
-  // 2. Cumulative milestones for submission streaks (6 badges)
-  const milestoneConfigs = [
-    { id: 'total_1', name: '꿈의 첫 삽 🗺️', count: 1, desc: 'IB 학습자상 기록 포트폴리오의 첫 걸음을 떼었습니다.' },
-    { id: 'total_5', name: '습관의 새싹 📅', count: 5, desc: '배움을 기록하고 성찰하는 아름다운 주간 습관을 지녔습니다.' },
-    { id: 'total_10', name: '원칙 수호대 🛡️', count: 10, desc: '꾸준하고 규칙적으로 학습 성찰을 실천하고 있습니다.' },
-    { id: 'total_30', name: '영예로운 열정 💖', count: 30, desc: '한 달간 거르지 않고 자신을 탐구하고 성찰했습니다.' },
-    { id: 'total_100', name: '100일의 기적 💯', count: 100, desc: '세상을 이롭게 바꾸는 진정한 IB 글로벌 핵심 인재입니다.' },
-    { id: 'total_300', name: '성장의 화룡점정 🏆', count: 300, desc: '초등학교 5학년 과정 동안 완벽한 배움의 헌신을 선보였습니다!' }
-  ];
-
-  milestoneConfigs.forEach((m) => {
-    badges.push({
-      id: m.id,
-      name: m.name,
-      emoji: m.name.split(' ').pop() || '🏅',
-      description: m.desc,
-      requirementDescription: `총 포트폴리오 제출 ${m.count}일 달성 (현재: ${totalDaysCount}일)`,
-      requiredCount: m.count,
-      type: 'total_days'
-    });
-  });
-
-  return badges;
 }
 
 // Reconstruct historical records from cumulative profile counts for read-only share view

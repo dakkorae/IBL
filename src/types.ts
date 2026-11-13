@@ -38,19 +38,31 @@ export interface DailyRecord {
   memo?: string; // 예전 자유 메모 (이전 기록 호환용)
   reflections?: Reflection[];
   reflectionOnly?: boolean; // 체크한 미션 없이 성찰 기록만 남긴 날 (성찰하는 사람 +1)
+  submittedAt?: string; // 실제로 제출한 날짜 (YYYY-MM-DD)
 }
 
 export type ViewType = 'dashboard' | 'mission' | 'profiles' | 'settings' | 'badges';
 export type TimePeriod = 'day' | 'week' | 'month' | '3months' | '6months' | '1year';
+
+export type BadgeCategory = 'profile' | 'streak' | 'balance' | 'writing' | 'mission' | 'fun';
 
 export interface Badge {
   id: string;
   name: string;
   emoji: string;
   description: string;
-  requirementDescription: string;
+  requirementDescription: string; // 획득 조건 (예: "등교일 5일 연속 기록")
+  category: BadgeCategory;
   profileKey?: LearnerProfileKey;
+  level?: number; // 학습자상 배지의 단계 (1~3)
   requiredCount: number;
-  type: 'profile_count' | 'total_days';
+  unit: string; // 진행도 단위 (회, 일, 번, 줄 …)
+  secret?: boolean; // 받기 전까지 조건을 가리는 깜짝 배지
+  hint?: string; // 깜짝 배지의 힌트
+}
+
+export interface BadgeStatus extends Badge {
+  progress: number;
+  unlocked: boolean;
 }
 
