@@ -100,7 +100,7 @@ export default function Sidebar() {
 
       {/* Footer info */}
       <div className="hidden lg:block p-6 border-t border-slate-800 text-center">
-        <p className="text-[10px] text-slate-500 font-mono">IB Learner Profile v1.4</p>
+        <p className="text-[10px] text-slate-500 font-mono">IB Learner Profile v1.5</p>
         <p className="text-[9px] text-slate-600 mt-0.5">Designed for Elementary Grade 5</p>
       </div>
     </aside>
