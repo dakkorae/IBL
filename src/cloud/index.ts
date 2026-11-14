@@ -1,19 +1,20 @@
 import { CloudBackend, ClassSession } from './types';
+import { DEFAULT_FIREBASE_CONFIG } from './firebaseConfig';
 
 // 어떤 서버를 쓸지 결정
-// - .env에 Firebase 설정(VITE_FIREBASE_*)이 있으면 실제 서버
-// - VITE_CLOUD_DEMO=1 이면 체험용(이 브라우저 안에서만 동작)
-// - 둘 다 없으면 학급 기능을 끄고 지금처럼 기기에만 저장
+// - VITE_CLOUD_DEMO=1 이면 체험용(이 브라우저 안에서만 동작, 미리보기용)
+// - 그 밖에는 실제 서버(Firebase). 설정은 firebaseConfig.ts, .env의 VITE_FIREBASE_* 값이 있으면 그 값이 우선
+// - 설정이 비어 있으면 학급 기능을 끄고 기기에만 저장
 const env = import.meta.env;
 const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY as string | undefined,
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined,
-  projectId: env.VITE_FIREBASE_PROJECT_ID as string | undefined,
-  appId: env.VITE_FIREBASE_APP_ID as string | undefined
+  apiKey: (env.VITE_FIREBASE_API_KEY as string | undefined) || DEFAULT_FIREBASE_CONFIG.apiKey,
+  authDomain: (env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined) || DEFAULT_FIREBASE_CONFIG.authDomain,
+  projectId: (env.VITE_FIREBASE_PROJECT_ID as string | undefined) || DEFAULT_FIREBASE_CONFIG.projectId,
+  appId: (env.VITE_FIREBASE_APP_ID as string | undefined) || DEFAULT_FIREBASE_CONFIG.appId
 };
 
 export const cloudMode: 'firebase' | 'demo' | 'off' =
-  firebaseConfig.apiKey && firebaseConfig.projectId ? 'firebase' : env.VITE_CLOUD_DEMO === '1' ? 'demo' : 'off';
+  env.VITE_CLOUD_DEMO === '1' ? 'demo' : firebaseConfig.apiKey && firebaseConfig.projectId ? 'firebase' : 'off';
 
 let backendPromise: Promise<CloudBackend> | null = null;
 

@@ -19,8 +19,7 @@
 
 ## 3. 앱에 설정값 넣기
 
-- 내 컴퓨터에서 실행: `.env.example` 을 `.env` 로 복사해 값을 채웁니다.
-- Vercel 배포: 프로젝트 **Settings → Environment Variables** 에 같은 이름(`VITE_FIREBASE_API_KEY` 등 4개)으로 넣고 다시 배포합니다.
+현재 프로젝트(`ib-l-c9c6a`)의 설정값은 `src/cloud/firebaseConfig.ts` 에 들어 있어서 따로 할 일이 없습니다. 다른 Firebase 프로젝트로 바꾸려면 그 파일을 고치거나, `.env`(Vercel은 Environment Variables)에 `VITE_FIREBASE_API_KEY` 등 4개 값을 넣으면 그 값이 우선합니다.
 
 ## 4. 관리자 키 등록 (한 번만)
 
