@@ -15,6 +15,8 @@
 
 ## 2. 보안 규칙 넣기
 
+> 앱이 업데이트되어 `firestore.rules` 가 바뀌면 이 단계를 다시 해야 새 기능이 동작합니다.
+
 **Firestore Database → 규칙** 탭에서 기존 내용을 지우고, 저장소 최상위의 [`firestore.rules`](../firestore.rules) 내용을 그대로 붙여 넣은 뒤 **게시**합니다.
 
 ## 3. 앱에 설정값 넣기

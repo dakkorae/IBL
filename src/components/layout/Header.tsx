@@ -29,6 +29,7 @@ export default function Header() {
         <h2 className="text-base sm:text-lg font-black text-slate-800 tracking-tight truncate">
           {currentView === 'dashboard' && '종합 성장 대시보드'}
           {currentView === 'mission' && (selectedDate === todayStr ? '오늘의 미션 도전!' : '선택한 날짜 미션 도전')}
+          {currentView === 'class' && '우리 반'}
           {currentView === 'badges' && '나의 배지 전당'}
           {currentView === 'profiles' && 'IB 10대 학습자상 안내'}
           {currentView === 'settings' && '환경 설정'}

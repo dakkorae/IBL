@@ -2,15 +2,17 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Copy, Check, RefreshCw, Loader2, Users, CalendarCheck, Target, Eye, X, UserPlus, KeyRound, Trash2, Pencil } from 'lucide-react';
 import { PROFILE_DATA, getLocalDateString, parseDateString } from '../data';
 import { errorMessage, getBackend } from '../cloud';
-import { ClassInfo, CloudRecord, Student } from '../cloud/types';
+import { ClassGoal, ClassInfo, CloudRecord, Feedback, FeedbackMap, Student } from '../cloud/types';
+import { FEEDBACK_STAMPS, computeStats, goalProgress } from '../cloud/stats';
 import RadarChart from '../components/RadarChart';
 import { StudentStat, buildClassStats, displayName, recentSchoolDays } from './stats';
 import { btnDanger, btnGhost, btnPrimary, card, input, label } from './ui';
 
-type Tab = 'overview' | 'students' | 'manage';
+type Tab = 'overview' | 'students' | 'activity' | 'manage';
 const TABS: { key: Tab; name: string }[] = [
   { key: 'overview', name: '현황' },
   { key: 'students', name: '학생' },
+  { key: 'activity', name: '활동' },
   { key: 'manage', name: '관리' }
 ];
 const shortDate = (d: string) => {
@@ -29,6 +31,7 @@ export default function ClassDashboard({ classId, onBack, onRenamed, onGone }: P
   const [info, setInfo] = useState<ClassInfo | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [portfolios, setPortfolios] = useState<Record<string, CloudRecord[]>>({});
+  const [feedback, setFeedback] = useState<Record<string, FeedbackMap>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<Tab>('overview');
@@ -43,10 +46,13 @@ export default function ClassDashboard({ classId, onBack, onRenamed, onGone }: P
       const found = await backend.getClass(classId);
       if (!found) throw new Error('학급을 찾을 수 없어요. 삭제되었을 수 있어요.');
       if (!(await backend.isTeacher(classId))) throw new Error('이 기기는 이 학급의 교사로 등록되어 있지 않아요. ‘다른 기기에서 만든 학급 열기’로 다시 열어 주세요.');
-      const [list, ports] = await Promise.all([backend.listStudents(classId), backend.listPortfolios(classId)]);
+      const [list, ports, fb] = await Promise.all([backend.listStudents(classId), backend.listPortfolios(classId), backend.listFeedback(classId)]);
       setInfo(found);
       setStudents(list);
       setPortfolios(ports);
+      setFeedback(fb);
+      // 학생들에게 보여 주는 학급 합계를 전체 기록으로 다시 계산해 서버에 맞춰 둠
+      backend.setClassStats(classId, computeStats(list.map((st) => ports[st.id] || []))).catch((e) => console.error('학급 합계 저장 실패', e));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -118,7 +124,7 @@ export default function ClassDashboard({ classId, onBack, onRenamed, onGone }: P
       </div>
 
       {/* 탭 */}
-      <div role="tablist" className="grid grid-cols-3 bg-slate-200/70 p-1 rounded-xl sm:inline-grid sm:w-80">
+      <div role="tablist" className="grid grid-cols-4 bg-slate-200/70 p-1 rounded-xl sm:inline-grid sm:w-96">
         {TABS.map((t) => (
           <button key={t.key} role="tab" aria-selected={tab === t.key} type="button" onClick={() => setTab(t.key)}
             className={`h-10 rounded-lg text-sm font-extrabold transition-all cursor-pointer ${tab === t.key ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
@@ -131,11 +137,29 @@ export default function ClassDashboard({ classId, onBack, onRenamed, onGone }: P
 
       {tab === 'overview' && <Overview cls={cls} today={today} onOpen={setDetailId} />}
       {tab === 'students' && <StudentList stats={cls.stats} onOpen={setDetailId} />}
+      {tab === 'activity' && (
+        <Activity classId={classId} info={info} progress={info.goal ? goalProgress(info.goal, computeStats(students.map((st) => portfolios[st.id] || []))) : 0} onChange={(patch) => setInfo({ ...info, ...patch })} />
+      )}
       {tab === 'manage' && (
         <Manage classId={classId} info={info} students={students} reload={load} onRenamed={(n) => { setInfo({ ...info, name: n }); onRenamed(n); }} onGone={onGone} />
       )}
 
-      {detail && <StudentDetail stat={detail} onClose={() => setDetailId(null)} />}
+      {detail && (
+        <StudentDetail
+          stat={detail}
+          classId={classId}
+          feedback={feedback[detail.student.id] || {}}
+          onFeedback={(date, fb) =>
+            setFeedback((all) => {
+              const mine = { ...(all[detail.student.id] || {}) };
+              if (fb) mine[date] = fb;
+              else delete mine[date];
+              return { ...all, [detail.student.id]: mine };
+            })
+          }
+          onClose={() => setDetailId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -276,7 +300,58 @@ function StudentList({ stats, onOpen }: { stats: StudentStat[]; onOpen: (id: str
 }
 
 // ------------------------------------------------------------------ 학생 상세
-function StudentDetail({ stat, onClose }: { stat: StudentStat; onClose: () => void; key?: string }) {
+// 기록 한 건에 남기는 교사 피드백 (도장 + 한 줄). 학생 본인에게만 보임
+function FeedbackEditor({ classId, sid, date, value, onSaved }: { classId: string; sid: string; date: string; value?: Feedback; onSaved: (fb: Feedback | null) => void; key?: string }) {
+  const [stamp, setStamp] = useState(value?.stamp || '');
+  const [text, setText] = useState(value?.text || '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const dirty = stamp !== (value?.stamp || '') || text.trim() !== (value?.text || '');
+
+  const save = async (fb: Feedback | null) => {
+    setBusy(true);
+    setError('');
+    try {
+      await (await getBackend()).setFeedback(classId, sid, date, fb);
+      onSaved(fb);
+      if (!fb) {
+        setStamp('');
+        setText('');
+      }
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="pt-2 border-t border-slate-100 space-y-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] font-bold text-slate-500 mr-1">피드백</span>
+        {FEEDBACK_STAMPS.map((s) => (
+          <button key={s.stamp} type="button" aria-pressed={stamp === s.stamp} onClick={() => setStamp(stamp === s.stamp ? '' : s.stamp)}
+            className={`h-9 px-2.5 rounded-lg border text-xs font-bold cursor-pointer transition-all ${stamp === s.stamp ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-slate-600 hover:border-indigo-400'}`}>
+            {s.stamp} {s.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input className={`${input} !h-10`} value={text} maxLength={100} onChange={(e) => setText(e.target.value)} placeholder="한 줄 남기기 (선택)" aria-label={`${date} 기록에 남길 한 줄`} />
+        <button type="button" disabled={busy || !dirty || (!stamp && !text.trim())} onClick={() => save({ stamp, text: text.trim(), at: Date.now() })} className={`${btnPrimary} !h-10 !px-3 shrink-0`}>
+          {value ? '수정' : '보내기'}
+        </button>
+        {value && (
+          <button type="button" disabled={busy} onClick={() => save(null)} aria-label="피드백 지우기" title="피드백 지우기" className={`${btnGhost} !h-10 !px-3 shrink-0`}><Trash2 size={14} /></button>
+        )}
+      </div>
+      {value && !dirty && <p className="text-[11px] font-bold text-emerald-700">✓ 학생에게 전달됐어요</p>}
+      {error && <p role="alert" className="text-xs font-bold text-rose-600">⚠️ {error}</p>}
+    </div>
+  );
+}
+
+function StudentDetail({ stat, classId, feedback, onFeedback, onClose }: { stat: StudentStat; classId: string; feedback: FeedbackMap; onFeedback: (date: string, fb: Feedback | null) => void; onClose: () => void; key?: string }) {
   const [limit, setLimit] = useState(20);
   const max = Math.max(1, ...Object.values(stat.totals));
   const records = [...stat.records].reverse();
@@ -353,6 +428,7 @@ function StudentDetail({ stat, onClose }: { stat: StudentStat; onClose: () => vo
                   );
                 })}
                 {!r.reflections?.length && r.memo && <p className="text-sm text-slate-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 break-words">{r.memo}</p>}
+                <FeedbackEditor key={`${stat.student.id}-${r.date}`} classId={classId} sid={stat.student.id} date={r.date} value={feedback[r.date]} onSaved={(fb) => onFeedback(r.date, fb)} />
               </div>
             ))}
             {records.length > limit && (
@@ -361,6 +437,99 @@ function StudentDetail({ stat, onClose }: { stat: StudentStat; onClose: () => vo
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ 활동 (중점 학습자상 · 공동 목표)
+function Activity({ classId, info, progress, onChange }: { classId: string; info: ClassInfo; progress: number; onChange: (patch: Partial<ClassInfo>) => void }) {
+  const [focusKey, setFocusKey] = useState<string>(info.focus?.key || '');
+  const [note, setNote] = useState(info.focus?.note || '');
+  const [title, setTitle] = useState(info.goal?.title || '');
+  const [goalKey, setGoalKey] = useState<string>(info.goal?.profileKey || '');
+  const [target, setTarget] = useState(String(info.goal?.target || 100));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const save = async (patch: Partial<Pick<ClassInfo, 'focus' | 'goal'>>, text: string) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await (await getBackend()).updateClassActivity(classId, patch);
+      onChange(patch);
+      setMsg({ ok: true, text });
+    } catch (e) {
+      setMsg({ ok: false, text: errorMessage(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const goal = info.goal;
+  const pct = goal ? Math.min(100, Math.round((progress / Math.max(1, goal.target)) * 100)) : 0;
+
+  return (
+    <div className="space-y-4">
+      {msg && <p role="status" className={`text-sm font-bold ${msg.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{msg.ok ? '✅' : '⚠️'} {msg.text}</p>}
+      <p className="text-xs text-slate-500">여기에서 정한 내용은 학생 화면의 ‘우리 반’ 메뉴에 나타나요.</p>
+
+      <form className={`${card} p-4 sm:p-5 space-y-3`} onSubmit={(e) => { e.preventDefault(); save({ focus: focusKey ? { key: focusKey as ClassGoal['profileKey'] & string, note: note.trim() } : null }, focusKey ? '중점 학습자상을 정했어요.' : '중점 학습자상을 해제했어요.'); }}>
+        <h2 className="text-sm font-extrabold text-slate-900">⭐ 이번 주 중점 학습자상</h2>
+        <p className="text-xs text-slate-500">학생의 미션 카드에 ‘이번 주 중점’ 표시가 붙어요. 탐구 단원과 연결해 정해 보세요.</p>
+        <div>
+          <label className={label} htmlFor="f-key">학습자상</label>
+          <select id="f-key" className={input} value={focusKey} onChange={(e) => setFocusKey(e.target.value)}>
+            <option value="">정하지 않음</option>
+            {PROFILE_DATA.map((p) => <option key={p.key} value={p.key}>{p.emoji} {p.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={label} htmlFor="f-note">학생에게 한마디 (선택)</label>
+          <input id="f-note" className={input} value={note} maxLength={80} onChange={(e) => setNote(e.target.value)} placeholder="예: 이번 주 탐구 단원에서 질문을 많이 만들어 봐요!" />
+        </div>
+        <button type="submit" disabled={busy} className={btnPrimary}>저장</button>
+      </form>
+
+      <form className={`${card} p-4 sm:p-5 space-y-3`} onSubmit={(e) => {
+        e.preventDefault();
+        const n = Number(target);
+        if (!title.trim()) return setMsg({ ok: false, text: '목표 이름을 입력해 주세요.' });
+        if (!Number.isInteger(n) || n < 1 || n > 9999) return setMsg({ ok: false, text: '목표 횟수는 1부터 9999까지 입력해 주세요.' });
+        save({ goal: { title: title.trim(), profileKey: (goalKey || null) as ClassGoal['profileKey'], target: n, startDate: goal?.startDate || getLocalDateString() } }, goal ? '공동 목표를 고쳤어요.' : '공동 목표를 시작했어요.');
+      }}>
+        <h2 className="text-sm font-extrabold text-slate-900">🎯 학급 공동 목표</h2>
+        <p className="text-xs text-slate-500">개인 경쟁이 아니라 반 전체가 함께 채우는 목표예요. 시작한 날부터 학급 전체의 실천 횟수를 셉니다.</p>
+        {goal && (
+          <div className="p-3 bg-indigo-50/60 border border-indigo-100 rounded-xl space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-extrabold text-slate-900 truncate">{goal.title}</span>
+              <span className="font-black text-indigo-700 shrink-0">{progress} / {goal.target}번</span>
+            </div>
+            <div className="w-full h-2.5 bg-white rounded-full overflow-hidden"><div className={`h-full rounded-full ${progress >= goal.target ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${pct}%` }} /></div>
+            <p className="text-[11px] text-slate-500">{goal.startDate}부터 진행 중{progress >= goal.target ? ' · 🎉 달성!' : ''}</p>
+          </div>
+        )}
+        <div>
+          <label className={label} htmlFor="g-title">목표 이름</label>
+          <input id="g-title" className={input} value={title} maxLength={40} onChange={(e) => setTitle(e.target.value)} placeholder="예: 우리 반 배려 100번!" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="sm:col-span-2">
+            <label className={label} htmlFor="g-key">세는 학습자상</label>
+            <select id="g-key" className={input} value={goalKey} onChange={(e) => setGoalKey(e.target.value)}>
+              <option value="">모든 학습자상</option>
+              {PROFILE_DATA.map((p) => <option key={p.key} value={p.key}>{p.emoji} {p.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={label} htmlFor="g-target">목표 횟수</label>
+            <input id="g-target" className={input} type="number" min={1} max={9999} value={target} onChange={(e) => setTarget(e.target.value)} />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="submit" disabled={busy} className={btnPrimary}>{goal ? '목표 고치기' : '목표 시작하기'}</button>
+          {goal && <button type="button" disabled={busy} onClick={() => { save({ goal: null }, '공동 목표를 끝냈어요.'); setTitle(''); }} className={btnGhost}>목표 끝내기</button>}
+        </div>
+      </form>
     </div>
   );
 }

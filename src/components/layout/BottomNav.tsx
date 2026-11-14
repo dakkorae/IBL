@@ -11,7 +11,8 @@ export default function BottomNav() {
       className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 shadow-[0_-2px_10px_rgba(15,23,42,0.06)] pb-[env(safe-area-inset-bottom)]"
     >
       <div className="grid grid-cols-5">
-        {NAV_ITEMS.map(({ view, shortLabel, icon: Icon }) => {
+        {/* 휴대폰 탭은 5칸: 학습자상 안내는 설정 화면에서 열 수 있음 */}
+        {NAV_ITEMS.filter((n) => n.view !== 'profiles').map(({ view, shortLabel, icon: Icon }) => {
           const active = currentView === view;
           return (
             <button

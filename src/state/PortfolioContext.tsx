@@ -4,7 +4,8 @@ import { PROFILE_DATA, generateMockHistory, calculateStats, getLocalDateString, 
 import { evaluateBadges } from '../badges';
 import { getDailyDrafts, saveDailyDraft, clearDailyDraft } from '../storage/drafts';
 import { getBackend, loadClassSession, saveClassSession } from '../cloud';
-import { ClassSession, CloudRecord } from '../cloud/types';
+import { ClassInfo, ClassPublicStats, ClassSession, CloudRecord, FeedbackMap } from '../cloud/types';
+import { recordDelta } from '../cloud/stats';
 
 export const MIN_REFLECTION_LENGTH = 5;
 const emptyReflection = (): Reflection => ({ profileKey: null, text: '' });
@@ -77,7 +78,7 @@ function usePortfolioState() {
   const [currentView, setCurrentView] = useState<ViewType>(() => {
     try {
       const saved = localStorage.getItem('ib_current_view') as ViewType | null;
-      if (saved && ['dashboard', 'mission', 'profiles', 'badges', 'settings'].includes(saved)) {
+      if (saved && ['dashboard', 'mission', 'class', 'profiles', 'badges', 'settings'].includes(saved)) {
         return saved;
       }
     } catch (e) {
@@ -540,7 +541,7 @@ function usePortfolioState() {
     setSubmittedToday(true);
     setIsEditingToday(false);
     clearDailyDraft(selectedDate); // Clear draft since formally submitted
-    pushToClass([newRecord]);
+    pushToClass([newRecord], classSession, history.find((r) => r.date === selectedDate && r.submitted));
 
     if (newlyUnlocked.length > 0) {
       setNewlyUnlockedBadges(newlyUnlocked);
@@ -739,6 +740,41 @@ function usePortfolioState() {
     return { ...r, missions, ...(rerolls && Object.keys(rerolls).length ? { rerolls } : {}), updatedAt: Date.now() };
   };
 
+  // 우리 반 정보: 학급 설정(중점 학습자상·공동 목표), 학급 합계, 선생님 피드백
+  const [classData, setClassData] = useState<{ info: ClassInfo | null; stats: ClassPublicStats | null; feedback: FeedbackMap }>({
+    info: null,
+    stats: null,
+    feedback: {}
+  });
+  const [classDataState, setClassDataState] = useState<'idle' | 'loading' | 'error'>('idle');
+
+  const loadClassData = async (session: ClassSession | null = classSession, notify = false) => {
+    if (!session) return;
+    setClassDataState('loading');
+    try {
+      const backend = await getBackend();
+      const [info, stats, feedback] = await Promise.all([
+        backend.getClass(session.classId),
+        backend.getClassStats(session.classId),
+        backend.getFeedback(session.classId, session.sid)
+      ]);
+      setClassData({ info, stats, feedback });
+      setClassDataState('idle');
+      if (notify) {
+        // 지난번 이후 새로 달린 선생님 피드백이 있으면 알려 줌
+        const seen = Number(localStorage.getItem('ib_feedback_seen') || 0);
+        const latest = Math.max(0, ...Object.values(feedback).map((f) => f.at || 0));
+        if (latest > seen) {
+          showToast('💌 선생님이 피드백을 남겼어요! ‘우리 반’에서 확인해 보세요.', 'info');
+          localStorage.setItem('ib_feedback_seen', String(latest));
+        }
+      }
+    } catch (e) {
+      console.error('우리 반 정보 불러오기 실패', e);
+      setClassDataState('error');
+    }
+  };
+
   const PENDING_KEY = 'ib_cloud_pending';
   const loadPending = (): string[] => {
     try {
@@ -749,13 +785,25 @@ function usePortfolioState() {
   };
 
   // 서버에 올리기. 실패하면 날짜를 적어 두었다가 다음에 다시 올림
-  const pushToClass = async (records: DailyRecord[], session: ClassSession | null = classSession): Promise<boolean> => {
+  const pushToClass = async (
+    records: DailyRecord[],
+    session: ClassSession | null = classSession,
+    previous?: DailyRecord,
+    updateStats = true
+  ): Promise<boolean> => {
     if (!session || records.length === 0) return true;
     const dates = records.map((r) => r.date);
     setSyncState('syncing');
     try {
       const backend = await getBackend();
       await backend.saveRecords(session.classId, session.sid, records.map(toCloudRecord));
+      if (updateStats) {
+        // 우리 반 합계에 이번 변화를 반영 (실패해도 기록 저장에는 영향 없음. 교사 화면이 열릴 때 다시 맞춰짐)
+        backend
+          .applyStatsDelta(session.classId, records.map((r) => recordDelta(records.length === 1 ? previous : undefined, r)))
+          .then(() => loadClassData(session))
+          .catch((e) => console.error('학급 합계 반영 실패', e));
+      }
       localStorage.setItem(PENDING_KEY, JSON.stringify(loadPending().filter((d) => !dates.includes(d))));
       setSyncState('idle');
       return true;
@@ -817,6 +865,7 @@ function usePortfolioState() {
     }
     saveClassSession(session);
     setClassSession(session);
+    loadClassData(session);
     const nextUser = { ...userInfo, name: session.nickname, school: session.className };
     setUserInfo(nextUser);
     localStorage.setItem('ib_user_info', JSON.stringify(nextUser));
@@ -826,6 +875,7 @@ function usePortfolioState() {
     const session = classSession;
     saveClassSession(null);
     setClassSession(null);
+    setClassData({ info: null, stats: null, feedback: {} });
     localStorage.removeItem(PENDING_KEY);
     setSyncState('idle');
     if (session) {
@@ -845,7 +895,7 @@ function usePortfolioState() {
       try {
         const pending = loadPending();
         if (pending.length > 0) {
-          const ok = await pushToClass(history.filter((r) => pending.includes(r.date)));
+          const ok = await pushToClass(history.filter((r) => pending.includes(r.date)), classSession, undefined, false);
           if (!ok) return;
         }
         const backend = await getBackend();
@@ -854,6 +904,7 @@ function usePortfolioState() {
         if (cancelled) return;
         applyCloudRecords(records);
         setSyncState('idle');
+        loadClassData(classSession, true);
       } catch (e) {
         console.error('학급 서버 동기화 실패', e);
         if (!cancelled) setSyncState('error');
@@ -873,8 +924,11 @@ function usePortfolioState() {
     customMissionsByDate,
     expandedProfileKey,
     badgeStatuses,
+    classData,
+    classDataState,
     classSession,
     connectClass,
+    refreshClassData: () => loadClassData(),
     disconnectClass,
     syncState,
     unlockedBadgeCount,

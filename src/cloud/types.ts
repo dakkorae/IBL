@@ -7,11 +7,52 @@ export interface CloudRecord extends DailyRecord {
   updatedAt: number;
 }
 
+// 이번 주 중점 학습자상
+export interface ClassFocus {
+  key: LearnerProfileKey;
+  note: string;
+}
+
+// 학급 공동 목표: startDate부터 학급 전체가 target번 실천하기 (profileKey가 null이면 모든 학습자상)
+export interface ClassGoal {
+  title: string;
+  profileKey: LearnerProfileKey | null;
+  target: number;
+  startDate: string;
+}
+
 export interface ClassInfo {
   id: string; // 학급 코드
   name: string;
   createdAt: number;
+  focus?: ClassFocus | null;
+  goal?: ClassGoal | null;
 }
+
+// 학생들에게 보여 주는 학급 합계 (개인별 수치는 담지 않음)
+export interface ClassPublicStats {
+  totals: Partial<Record<LearnerProfileKey, number>>;
+  records: number; // 제출된 기록 수
+  missions: number; // 실천한 미션 수
+  days: Record<string, { students: number; keys: Partial<Record<LearnerProfileKey, number>> }>;
+  updatedAt?: number;
+}
+
+// 합계에 더하거나 뺄 변화량 (학생이 기록을 제출·수정할 때)
+export interface StatsDelta {
+  date: string;
+  students: number;
+  missions: number;
+  keys: Partial<Record<LearnerProfileKey, number>>;
+}
+
+// 교사가 학생 기록에 남기는 피드백 (도장 + 한 줄)
+export interface Feedback {
+  stamp: string;
+  text: string;
+  at: number;
+}
+export type FeedbackMap = Record<string, Feedback>; // 날짜 → 피드백
 
 export interface Student {
   id: string;
@@ -61,6 +102,10 @@ export interface CloudBackend {
   removeStudent(classId: string, sid: string): Promise<void>;
   resetPin(classId: string, sid: string): Promise<void>;
   listPortfolios(classId: string): Promise<Record<string, CloudRecord[]>>;
+  updateClassActivity(classId: string, patch: { focus?: ClassFocus | null; goal?: ClassGoal | null }): Promise<void>;
+  setClassStats(classId: string, stats: ClassPublicStats): Promise<void>;
+  listFeedback(classId: string): Promise<Record<string, FeedbackMap>>;
+  setFeedback(classId: string, sid: string, date: string, feedback: Feedback | null): Promise<void>;
   deleteClass(classId: string): Promise<void>;
 
   // 공통
@@ -72,6 +117,9 @@ export interface CloudBackend {
   leaveClass(classId: string): Promise<void>;
   getPortfolio(classId: string, sid: string): Promise<CloudRecord[]>;
   saveRecords(classId: string, sid: string, records: CloudRecord[]): Promise<void>;
+  getClassStats(classId: string): Promise<ClassPublicStats | null>;
+  applyStatsDelta(classId: string, deltas: StatsDelta[]): Promise<void>;
+  getFeedback(classId: string, sid: string): Promise<FeedbackMap>;
 }
 
 export class CloudError extends Error {

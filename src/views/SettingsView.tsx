@@ -12,12 +12,23 @@ export default function SettingsView() {
     handleResetData,
     handleSaveSettings,
     setUserInfo,
-    userInfo
+    userInfo,
+    setCurrentView
   } = usePortfolio();
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       {/* 화면 테마 (색상 · 글꼴 · 글자 크기) */}
+      {/* 휴대폰에서는 하단 탭에 없는 '학습자상 안내'를 여기에서 엶 */}
+      <button
+        type="button"
+        onClick={() => setCurrentView('profiles')}
+        className="md:hidden bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between text-left cursor-pointer"
+      >
+        <span className="text-sm font-bold text-slate-800">📖 IB 10대 학습자상 안내 보기</span>
+        <span className="text-slate-400">›</span>
+      </button>
+
       {/* 학급 참여 (서버 저장) */}
       <ClassJoinCard />
 

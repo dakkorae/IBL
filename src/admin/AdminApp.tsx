@@ -102,7 +102,7 @@ export default function AdminApp() {
 
         {admin && (
           <>
-            <form className={`${card} p-4 sm:p-6 space-y-3`} onSubmit={(e) => { e.preventDefault(); const n = Number(max); if (!Number.isInteger(n) || n < 1 || n > 20) return setError('학급 수는 1부터 20까지 입력해 주세요.'); run(async (b) => { const c = await b.createInviteCode(n, memo.trim()); setCodes((list) => [c, ...list]); setMemo(''); }); }}>
+            <form className={`${card} p-4 sm:p-6 space-y-3`} onSubmit={(e) => { e.preventDefault(); const n = Number(max); if (!Number.isInteger(n) || n < 1 || n > 100) return setError('학급 수는 1부터 100까지 입력해 주세요.'); run(async (b) => { const c = await b.createInviteCode(n, memo.trim()); setCodes((list) => [c, ...list]); setMemo(''); }); }}>
               <h1 className="text-lg font-black text-slate-900">개설 코드 만들기</h1>
               <p className="text-xs text-slate-500">코드를 받은 선생님만 학급을 개설할 수 있어요. 메모에는 누구에게 준 코드인지 적어 두세요.</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -112,7 +112,7 @@ export default function AdminApp() {
                 </div>
                 <div>
                   <label className={label} htmlFor="a-max">개설 가능한 학급 수</label>
-                  <input id="a-max" className={input} type="number" min={1} max={20} value={max} onChange={(e) => setMax(e.target.value)} />
+                  <input id="a-max" className={input} type="number" min={1} max={100} value={max} onChange={(e) => setMax(e.target.value)} />
                 </div>
               </div>
               <button type="submit" disabled={busy} className={`${btnPrimary} w-full sm:w-auto`}>{busy && <Loader2 size={16} className="animate-spin" />} 코드 만들기</button>

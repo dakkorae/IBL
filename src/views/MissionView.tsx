@@ -24,10 +24,13 @@ export default function MissionView() {
     selectedMissions,
     setCurrentView,
     submittedToday,
-    todayStr
+    todayStr,
+    classData,
+    classSession
   } = usePortfolio();
 
   const formDisabled = submittedToday && !isEditingToday;
+  const focusKey = classSession ? classData.info?.focus?.key : undefined;
   const hasDraft = selectedMissions.length > 0 || reflections.some((r) => r.text.trim().length > 0);
 
   return (
@@ -153,6 +156,11 @@ export default function MissionView() {
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${profile.bgColor} ${profile.textColor}`}>
                           {profile.englishName}
                         </span>
+                        {focusKey === profile.key && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-amber-100 text-amber-800 border border-amber-200 whitespace-nowrap">
+                            ⭐ 이번 주 중점
+                          </span>
+                        )}
                         <span className="hidden sm:inline text-[10px] text-slate-400 font-mono whitespace-nowrap">MISSION #{idx + 1}</span>
                       </p>
                     </div>

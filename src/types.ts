@@ -41,7 +41,7 @@ export interface DailyRecord {
   submittedAt?: string; // 실제로 제출한 날짜 (YYYY-MM-DD)
 }
 
-export type ViewType = 'dashboard' | 'mission' | 'profiles' | 'settings' | 'badges';
+export type ViewType = 'dashboard' | 'mission' | 'class' | 'profiles' | 'settings' | 'badges';
 export type TimePeriod = 'day' | 'week' | 'month' | '3months' | '6months' | '1year';
 
 export type BadgeCategory = 'profile' | 'streak' | 'balance' | 'writing' | 'mission' | 'fun';

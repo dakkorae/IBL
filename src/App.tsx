@@ -9,6 +9,7 @@ import DashboardView from './views/DashboardView';
 import MissionView from './views/MissionView';
 import ProfilesView from './views/ProfilesView';
 import BadgesView from './views/BadgesView';
+import ClassView from './views/ClassView';
 import SettingsView from './views/SettingsView';
 import CelebrateModal from './components/modals/CelebrateModal';
 import BadgeUnlockModal from './components/modals/BadgeUnlockModal';
@@ -36,6 +37,7 @@ function AppLayout() {
           {currentView === 'dashboard' && <DashboardView />}
           {currentView === 'mission' && <MissionView />}
           {currentView === 'profiles' && <ProfilesView />}
+          {currentView === 'class' && <ClassView />}
           {currentView === 'badges' && <BadgesView />}
           {currentView === 'settings' && <SettingsView />}
         </div>

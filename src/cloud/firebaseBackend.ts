@@ -4,15 +4,17 @@ import {
   FieldPath,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
   getFirestore,
+  increment,
   setDoc,
   updateDoc,
   writeBatch
 } from 'firebase/firestore';
-import { ClassInfo, CloudBackend, CloudError, CloudRecord, InviteCode, JoinResult, Student } from './types';
+import { ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, JoinResult, Student } from './types';
 import { adminKeyHash, chunk, clean, normalizeCode, pinHash, randomCode, teacherKeyHash } from './util';
 
 export interface FirebaseConfig {
@@ -166,6 +168,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       await uid();
       const batch = writeBatch(db);
       batch.delete(subDoc(classId, 'portfolios', sid));
+      batch.delete(subDoc(classId, 'feedback', sid));
       batch.delete(subDoc(classId, 'pins', sid));
       batch.delete(subDoc(classId, 'students', sid));
       await batch.commit();
@@ -187,12 +190,32 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       });
       return out;
     },
+    async updateClassActivity(classId, patch) {
+      await uid();
+      await updateDoc(classRef(classId), clean(patch));
+    },
+    async setClassStats(classId, stats) {
+      await uid();
+      await setDoc(subDoc(classId, 'public', 'stats'), { ...clean(stats), updatedAt: Date.now() });
+    },
+    async listFeedback(classId) {
+      await uid();
+      const snap = await getDocs(sub(classId, 'feedback'));
+      const out: Record<string, FeedbackMap> = {};
+      snap.docs.forEach((d) => (out[d.id] = (d.data().items || {}) as FeedbackMap));
+      return out;
+    },
+    async setFeedback(classId, sid, date, feedback) {
+      await uid();
+      await setDoc(subDoc(classId, 'feedback', sid), { items: { [date]: feedback ? clean(feedback) : deleteField() } }, { merge: true });
+    },
     async deleteClass(classId) {
       const id = await uid();
       // 하위 문서를 모두 지운 뒤 학급 문서를 지우고, 마지막에 교사 등록을 지움
       const students = await getDocs(sub(classId, 'students'));
       const refs = students.docs.flatMap((d) => [
         subDoc(classId, 'portfolios', d.id),
+        subDoc(classId, 'feedback', d.id),
         subDoc(classId, 'pins', d.id),
         subDoc(classId, 'students', d.id)
       ]);
@@ -200,7 +223,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       members.docs.forEach((d) => refs.push(d.ref));
       const teachers = await getDocs(sub(classId, 'teachers'));
       teachers.docs.filter((d) => d.id !== id).forEach((d) => refs.push(d.ref));
-      refs.push(subDoc(classId, 'secrets', 'teacher'), classRef(classId));
+      refs.push(subDoc(classId, 'public', 'stats'), subDoc(classId, 'secrets', 'teacher'), classRef(classId));
       for (const part of chunk(refs, 10)) {
         const b = writeBatch(db);
         part.forEach((r) => b.delete(r));
@@ -217,7 +240,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       const snap = await getDoc(classRef(cid));
       if (!snap.exists()) return null;
       const d = snap.data();
-      return { id: cid, name: String(d.name || ''), createdAt: Number(d.createdAt) || 0 } as ClassInfo;
+      return { id: cid, name: String(d.name || ''), createdAt: Number(d.createdAt) || 0, focus: d.focus || null, goal: d.goal || null } as ClassInfo;
     },
     async listStudents(classId) {
       await uid();
@@ -274,6 +297,52 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
         const [firstPath, firstValue, ...rest] = [...args, 'updatedAt', Date.now()];
         await updateDoc(ref, firstPath as FieldPath, firstValue, ...rest);
       }
+    },
+    async getClassStats(classId) {
+      await uid();
+      const snap = await getDoc(subDoc(classId, 'public', 'stats'));
+      if (!snap.exists()) return null;
+      const d = snap.data();
+      return { totals: d.totals || {}, records: d.records || 0, missions: d.missions || 0, days: d.days || {}, updatedAt: d.updatedAt } as ClassPublicStats;
+    },
+    async applyStatsDelta(classId, deltas) {
+      await uid();
+      // 합계 문서의 해당 칸에만 더하기·빼기 (다른 학생의 변화와 겹쳐도 안전)
+      const totals: Record<string, unknown> = {};
+      const days: Record<string, unknown> = {};
+      let records = 0;
+      let missions = 0;
+      const sum: Record<string, number> = {};
+      deltas.forEach((d) => {
+        const keys: Record<string, unknown> = {};
+        Object.entries(d.keys).forEach(([k, n]) => {
+          if (!n) return;
+          keys[k] = increment(n);
+          sum[k] = (sum[k] || 0) + n;
+        });
+        // 주의: merge 저장에서 빈 객체는 그 칸을 통째로 비우므로, 바뀐 것이 있을 때만 담는다
+        const day = { ...(d.students ? { students: increment(d.students) } : {}), ...(Object.keys(keys).length ? { keys } : {}) };
+        if (Object.keys(day).length) days[d.date] = day;
+        records += d.students;
+        missions += d.missions;
+      });
+      Object.entries(sum).forEach(([k, n]) => n && (totals[k] = increment(n)));
+      await setDoc(
+        subDoc(classId, 'public', 'stats'),
+        {
+          ...(Object.keys(totals).length ? { totals } : {}),
+          ...(Object.keys(days).length ? { days } : {}),
+          records: increment(records),
+          missions: increment(missions),
+          updatedAt: Date.now()
+        },
+        { merge: true }
+      );
+    },
+    async getFeedback(classId, sid) {
+      await uid();
+      const snap = await getDoc(subDoc(classId, 'feedback', sid));
+      return ((snap.data() || {}).items || {}) as FeedbackMap;
     }
   };
 

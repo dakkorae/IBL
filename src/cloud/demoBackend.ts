@@ -1,4 +1,5 @@
-import { ClassInfo, CloudBackend, CloudError, CloudRecord, InviteCode, Student } from './types';
+import { ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, Student } from './types';
+import { emptyStats } from './stats';
 import { adminKeyHash, normalizeCode, pinHash, randomCode, teacherKeyHash } from './util';
 
 // 체험용 서버: 실제 서버 없이 이 브라우저 안(localStorage)에서만 동작함
@@ -10,6 +11,8 @@ interface DemoClass {
   students: Record<string, Student>;
   pins: Record<string, string>;
   portfolios: Record<string, Record<string, CloudRecord>>;
+  stats?: ClassPublicStats;
+  feedback?: Record<string, FeedbackMap>;
 }
 interface DemoState {
   invites: Record<string, InviteCode>;
@@ -149,6 +152,7 @@ export function createDemoBackend(): CloudBackend {
       delete c.students[sid];
       delete c.pins[sid];
       delete c.portfolios[sid];
+      if (c.feedback) delete c.feedback[sid];
       save(s);
     },
     async resetPin(classId, sid) {
@@ -167,6 +171,28 @@ export function createDemoBackend(): CloudBackend {
         out[sid] = Object.values(recs).sort((a, b) => a.date.localeCompare(b.date));
       });
       return out;
+    },
+    async updateClassActivity(classId, patch) {
+      const s = load();
+      Object.assign(needTeacher(s, classId).info, patch);
+      save(s);
+    },
+    async setClassStats(classId, stats) {
+      const s = load();
+      needTeacher(s, classId).stats = { ...stats, updatedAt: Date.now() };
+      save(s);
+    },
+    async listFeedback(classId) {
+      return needTeacher(load(), classId).feedback || {};
+    },
+    async setFeedback(classId, sid, date, feedback) {
+      const s = load();
+      const c = needTeacher(s, classId);
+      c.feedback = c.feedback || {};
+      c.feedback[sid] = c.feedback[sid] || {};
+      if (feedback) c.feedback[sid][date] = feedback;
+      else delete c.feedback[sid][date];
+      save(s);
     },
     async deleteClass(classId) {
       await wait();
@@ -221,6 +247,34 @@ export function createDemoBackend(): CloudBackend {
       c.portfolios[sid] = c.portfolios[sid] || {};
       records.forEach((r) => (c.portfolios[sid][r.date] = r));
       save(s);
+    },
+    async getClassStats(classId) {
+      await wait();
+      const s = load();
+      if (!(classId in s.memberOf) && !s.teacherOf.includes(classId)) throw new CloudError('permission', '권한이 없어요.');
+      return need(s, classId).stats || null;
+    },
+    async applyStatsDelta(classId, deltas) {
+      const s = load();
+      const c = need(s, classId);
+      const st = (c.stats = c.stats || emptyStats());
+      deltas.forEach((d) => {
+        const day = (st.days[d.date] = st.days[d.date] || { students: 0, keys: {} });
+        day.students += d.students;
+        st.records += d.students;
+        st.missions += d.missions;
+        Object.entries(d.keys).forEach(([k, n]) => {
+          const key = k as keyof typeof st.totals;
+          day.keys[key] = (day.keys[key] || 0) + (n || 0);
+          st.totals[key] = (st.totals[key] || 0) + (n || 0);
+        });
+      });
+      save(s);
+    },
+    async getFeedback(classId, sid) {
+      const s = load();
+      if (s.memberOf[classId] !== sid && !s.teacherOf.includes(classId)) throw new CloudError('permission', '권한이 없어요.');
+      return need(s, classId).feedback?.[sid] || {};
     }
   };
 }

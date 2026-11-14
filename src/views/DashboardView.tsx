@@ -14,7 +14,8 @@ export default function DashboardView() {
     stats,
     statsPeriod,
     submittedToday,
-    todayStr
+    todayStr,
+    classData
   } = usePortfolio();
 
   return (
@@ -275,6 +276,11 @@ export default function DashboardView() {
                       </p>
                     );
                   })}
+                  {classData.feedback[record.date] && (
+                    <p className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-2.5 py-1.5 break-words">
+                      👩‍🏫 선생님: {classData.feedback[record.date].stamp} {classData.feedback[record.date].text}
+                    </p>
+                  )}
                   {!record.reflections?.length && record.memo && (
                     <p className="text-xs text-slate-600 leading-relaxed font-medium break-words">
                       "{record.memo}"

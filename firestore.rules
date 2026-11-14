@@ -20,6 +20,9 @@ service cloud.firestore {
     function isTeacher(cid) {
       return signedIn() && exists(/databases/$(db)/documents/classes/$(cid)/teachers/$(request.auth.uid));
     }
+    function isMember(cid) {
+      return signedIn() && exists(/databases/$(db)/documents/classes/$(cid)/members/$(request.auth.uid));
+    }
     // 이 기기가 학급 cid의 학생 sid로 등록되어 있고, 그 뒤로 비밀번호가 초기화되지 않았는지
     function isStudent(cid, sid) {
       let member = get(/databases/$(db)/documents/classes/$(cid)/members/$(request.auth.uid));
@@ -76,8 +79,9 @@ service cloud.firestore {
         && getAfter(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.usedCount
            == get(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.usedCount + 1
         && existsAfter(/databases/$(db)/documents/classes/$(cid)/teachers/$(request.auth.uid));
+      // 교사가 바꿀 수 있는 것: 학급 이름, 중점 학습자상(focus), 공동 목표(goal)
       allow update: if isTeacher(cid)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'focus', 'goal'])
         && request.resource.data.name is string && request.resource.data.name.size() <= 40;
       allow delete: if isTeacher(cid) || isAdmin();
 
@@ -126,6 +130,17 @@ service cloud.firestore {
           && request.resource.data.pinHash
              == getAfter(/databases/$(db)/documents/classes/$(cid)/pins/$(request.resource.data.sid)).data.pinHash;
         allow delete: if (signedIn() && request.auth.uid == uid) || isTeacher(cid);
+      }
+      // 학급 합계(학생들에게 보여 주는 우리 반 현황): 개인별 수치 없이 합계만 담음
+      // 학급에 참여한 기기와 교사가 읽고 씀. 교사 화면을 열 때마다 전체 기록으로 다시 계산해 바로잡음
+      match /public/{docId} {
+        allow get, create, update: if isTeacher(cid) || isMember(cid);
+        allow delete: if isTeacher(cid);
+      }
+      // 교사 피드백: 교사가 쓰고, 해당 학생 본인만 읽음
+      match /feedback/{sid} {
+        allow get: if isTeacher(cid) || isStudent(cid, sid);
+        allow list, create, update, delete: if isTeacher(cid);
       }
       // 학생별 실천 기록: 본인과 교사만 읽고, 본인만 씀
       match /portfolios/{sid} {
