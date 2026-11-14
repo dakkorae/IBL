@@ -26,11 +26,13 @@ export default function MissionView() {
     submittedToday,
     todayStr,
     classData,
-    classSession
+    classSession,
+    handleSetClassMission
   } = usePortfolio();
 
   const formDisabled = submittedToday && !isEditingToday;
   const focusKey = classSession ? classData.info?.focus?.key : undefined;
+  const classMissions = (classSession && classData.info?.extraMissions) || {};
   const hasDraft = selectedMissions.length > 0 || reflections.some((r) => r.text.trim().length > 0);
 
   return (
@@ -242,6 +244,20 @@ export default function MissionView() {
                   <p className="text-sm text-slate-700 font-semibold leading-relaxed break-keep">
                     {getMissionForDay(profile.key, selectedDate, customMissionsByDate[selectedDate])}
                   </p>
+                  {!formDisabled && (classMissions[profile.key] || []).length > 0 && (
+                    <select
+                      value=""
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => e.target.value && handleSetClassMission(profile.key, e.target.value)}
+                      aria-label={`${profile.name} 우리 반 미션 고르기`}
+                      className="mt-2 w-full h-10 px-2 text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg cursor-pointer"
+                    >
+                      <option value="">🏫 우리 반 미션으로 바꾸기 ({(classMissions[profile.key] || []).length}개)</option>
+                      {(classMissions[profile.key] || []).map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 {/* Bottom Hint Tip */}

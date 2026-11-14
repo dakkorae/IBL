@@ -1,18 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Copy, Check, RefreshCw, Loader2, Users, CalendarCheck, Target, Eye, X, UserPlus, KeyRound, Trash2, Pencil } from 'lucide-react';
+import { ArrowLeft, Copy, Check, RefreshCw, Loader2, Users, CalendarCheck, Target, Eye, X, Download, UserPlus, KeyRound, Trash2, Pencil } from 'lucide-react';
 import { PROFILE_DATA, getLocalDateString, parseDateString } from '../data';
 import { errorMessage, getBackend } from '../cloud';
 import { ClassGoal, ClassInfo, CloudRecord, Feedback, FeedbackMap, Student } from '../cloud/types';
 import { FEEDBACK_STAMPS, computeStats, goalProgress } from '../cloud/stats';
 import RadarChart from '../components/RadarChart';
 import { StudentStat, buildClassStats, displayName, recentSchoolDays } from './stats';
+import Inbox from './Inbox';
+import { downloadClassSummary, downloadStudentReport } from './report';
 import { btnDanger, btnGhost, btnPrimary, card, input, label } from './ui';
 
-type Tab = 'overview' | 'students' | 'activity' | 'manage';
+type Tab = 'overview' | 'students' | 'activity' | 'inbox' | 'manage';
 const TABS: { key: Tab; name: string }[] = [
   { key: 'overview', name: '현황' },
   { key: 'students', name: '학생' },
   { key: 'activity', name: '활동' },
+  { key: 'inbox', name: '소통' },
   { key: 'manage', name: '관리' }
 ];
 const shortDate = (d: string) => {
@@ -124,7 +127,7 @@ export default function ClassDashboard({ classId, onBack, onRenamed, onGone }: P
       </div>
 
       {/* 탭 */}
-      <div role="tablist" className="grid grid-cols-4 bg-slate-200/70 p-1 rounded-xl sm:inline-grid sm:w-96">
+      <div role="tablist" className="grid grid-cols-5 bg-slate-200/70 p-1 rounded-xl sm:inline-grid sm:w-[28rem]">
         {TABS.map((t) => (
           <button key={t.key} role="tab" aria-selected={tab === t.key} type="button" onClick={() => setTab(t.key)}
             className={`h-10 rounded-lg text-sm font-extrabold transition-all cursor-pointer ${tab === t.key ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
@@ -136,10 +139,16 @@ export default function ClassDashboard({ classId, onBack, onRenamed, onGone }: P
       {error && <p role="alert" className="text-sm font-bold text-rose-600">⚠️ {error}</p>}
 
       {tab === 'overview' && <Overview cls={cls} today={today} onOpen={setDetailId} />}
-      {tab === 'students' && <StudentList stats={cls.stats} onOpen={setDetailId} />}
+      {tab === 'students' && (
+        <>
+          <button type="button" onClick={() => downloadClassSummary(info.name, cls.stats)} className={btnGhost}><Download size={15} /> 학급 요약 내려받기 (엑셀용 CSV)</button>
+          <StudentList stats={cls.stats} onOpen={setDetailId} />
+        </>
+      )}
       {tab === 'activity' && (
         <Activity classId={classId} info={info} progress={info.goal ? goalProgress(info.goal, computeStats(students.map((st) => portfolios[st.id] || []))) : 0} onChange={(patch) => setInfo({ ...info, ...patch })} />
       )}
+      {tab === 'inbox' && <Inbox classId={classId} />}
       {tab === 'manage' && (
         <Manage classId={classId} info={info} students={students} reload={load} onRenamed={(n) => { setInfo({ ...info, name: n }); onRenamed(n); }} onGone={onGone} />
       )}
@@ -148,6 +157,7 @@ export default function ClassDashboard({ classId, onBack, onRenamed, onGone }: P
         <StudentDetail
           stat={detail}
           classId={classId}
+          className={info.name}
           feedback={feedback[detail.student.id] || {}}
           onFeedback={(date, fb) =>
             setFeedback((all) => {
@@ -351,7 +361,7 @@ function FeedbackEditor({ classId, sid, date, value, onSaved }: { classId: strin
   );
 }
 
-function StudentDetail({ stat, classId, feedback, onFeedback, onClose }: { stat: StudentStat; classId: string; feedback: FeedbackMap; onFeedback: (date: string, fb: Feedback | null) => void; onClose: () => void; key?: string }) {
+function StudentDetail({ stat, classId, className, feedback, onFeedback, onClose }: { stat: StudentStat; classId: string; className: string; feedback: FeedbackMap; onFeedback: (date: string, fb: Feedback | null) => void; onClose: () => void; key?: string }) {
   const [limit, setLimit] = useState(20);
   const max = Math.max(1, ...Object.values(stat.totals));
   const records = [...stat.records].reverse();
@@ -393,7 +403,10 @@ function StudentDetail({ stat, classId, feedback, onFeedback, onClose }: { stat:
           </div>
 
           <div className="space-y-2">
-            <h3 className="text-sm font-extrabold text-slate-900">실천 기록</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-extrabold text-slate-900">실천 기록</h3>
+              <button type="button" onClick={() => downloadStudentReport(className, stat, feedback)} className={`${btnGhost} !h-9 !px-3 !text-xs`}><Download size={13} /> 성장 리포트 (CSV)</button>
+            </div>
             {records.length === 0 && <p className="text-sm text-slate-500">아직 기록이 없어요.</p>}
             {records.slice(0, limit).map((r) => (
               <div key={r.date} className={`${card} p-3.5 space-y-2`}>
@@ -451,7 +464,7 @@ function Activity({ classId, info, progress, onChange }: { classId: string; info
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const save = async (patch: Partial<Pick<ClassInfo, 'focus' | 'goal'>>, text: string) => {
+  const save = async (patch: Partial<Pick<ClassInfo, 'focus' | 'goal' | 'extraMissions'>>, text: string) => {
     setBusy(true);
     setMsg(null);
     try {
@@ -463,6 +476,14 @@ function Activity({ classId, info, progress, onChange }: { classId: string; info
     } finally {
       setBusy(false);
     }
+  };
+  // 우리 반 미션
+  const [mKey, setMKey] = useState<string>(PROFILE_DATA[0].key);
+  const [mText, setMText] = useState('');
+  const extra = info.extraMissions || {};
+  const saveMissions = (key: string, list: string[], text: string) => {
+    const next = { ...extra, [key]: list };
+    return save({ extraMissions: next }, text);
   };
   const goal = info.goal;
   const pct = goal ? Math.min(100, Math.round((progress / Math.max(1, goal.target)) * 100)) : 0;
@@ -529,6 +550,39 @@ function Activity({ classId, info, progress, onChange }: { classId: string; info
           <button type="submit" disabled={busy} className={btnPrimary}>{goal ? '목표 고치기' : '목표 시작하기'}</button>
           {goal && <button type="button" disabled={busy} onClick={() => { save({ goal: null }, '공동 목표를 끝냈어요.'); setTitle(''); }} className={btnGhost}>목표 끝내기</button>}
         </div>
+      </form>
+
+      <form className={`${card} p-4 sm:p-5 space-y-3`} onSubmit={(e) => {
+        e.preventDefault();
+        const t = mText.trim();
+        const list = (extra as Record<string, string[]>)[mKey] || [];
+        if (t.length < 5) return setMsg({ ok: false, text: '미션은 5글자 이상으로 써 주세요.' });
+        if (list.length >= 10) return setMsg({ ok: false, text: '학습자상마다 10개까지 넣을 수 있어요.' });
+        if (list.includes(t)) return setMsg({ ok: false, text: '이미 있는 미션이에요.' });
+        saveMissions(mKey, [...list, t], '우리 반 미션을 추가했어요.').then(() => setMText(''));
+      }}>
+        <h2 className="text-sm font-extrabold text-slate-900">🏫 우리 반 미션</h2>
+        <p className="text-xs text-slate-500">우리 반에 맞는 미션을 직접 넣을 수 있어요. 학생의 미션 카드에 ‘우리 반 미션으로 바꾸기’가 나타나고, 고르면 그날 미션이 바뀝니다.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <select className={input} value={mKey} onChange={(e) => setMKey(e.target.value)} aria-label="미션을 넣을 학습자상">
+            {PROFILE_DATA.map((p) => <option key={p.key} value={p.key}>{p.emoji} {p.name}</option>)}
+          </select>
+          <input className={`${input} sm:col-span-2`} value={mText} maxLength={60} onChange={(e) => setMText(e.target.value)} placeholder="예: 급식실에서 조리사 선생님께 인사하기" aria-label="새 미션" />
+        </div>
+        <button type="submit" disabled={busy} className={btnPrimary}>미션 추가</button>
+        {PROFILE_DATA.filter((p) => ((extra as Record<string, string[]>)[p.key] || []).length > 0).map((p) => (
+          <div key={p.key}>
+            <p className="text-xs font-bold text-slate-700 mt-2">{p.emoji} {p.name}</p>
+            <ul className="mt-1 space-y-1">
+              {((extra as Record<string, string[]>)[p.key] || []).map((m) => (
+                <li key={m} className="flex items-center gap-2 text-sm text-slate-700">
+                  <span className="flex-1 min-w-0 break-keep">· {m}</span>
+                  <button type="button" disabled={busy} aria-label={`미션 지우기: ${m}`} onClick={() => saveMissions(p.key, ((extra as Record<string, string[]>)[p.key] || []).filter((x) => x !== m), '미션을 지웠어요.')} className="w-9 h-9 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center cursor-pointer"><Trash2 size={14} /></button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </form>
     </div>
   );

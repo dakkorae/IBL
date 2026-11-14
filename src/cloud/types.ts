@@ -27,6 +27,7 @@ export interface ClassInfo {
   createdAt: number;
   focus?: ClassFocus | null;
   goal?: ClassGoal | null;
+  extraMissions?: Partial<Record<LearnerProfileKey, string[]>> | null; // 교사가 추가한 우리 반 미션
 }
 
 // 학생들에게 보여 주는 학급 합계 (개인별 수치는 담지 않음)
@@ -53,6 +54,32 @@ export interface Feedback {
   at: number;
 }
 export type FeedbackMap = Record<string, Feedback>; // 날짜 → 피드백
+
+// 칭찬 쪽지(note)와 나눔 게시판 글(share). 학생이 쓰면 '대기' 상태가 되고 교사가 승인해야 전달·게시됨
+export type PostStatus = 'pending' | 'approved' | 'rejected' | 'removed';
+export interface Post {
+  id: string;
+  type: 'note' | 'share';
+  from: string; // 쓴 학생 sid
+  fromName: string;
+  to?: string; // 쪽지를 받는 학생 sid
+  toName?: string;
+  profileKey: LearnerProfileKey | null;
+  text: string;
+  status: PostStatus;
+  createdAt: number;
+}
+// 승인되어 게시판·받은 쪽지함에 올라간 글
+export type Entry = Omit<Post, 'status'>;
+
+// 공감 스티커: 누가(sid) 어느 글(postId, 글쓴이 author)에 무엇(kind)을 눌렀는지
+export type ReactionKind = 'clap' | 'try' | 'thanks';
+export interface Reaction {
+  postId: string;
+  sid: string;
+  author: string;
+  kind: ReactionKind;
+}
 
 export interface Student {
   id: string;
@@ -102,7 +129,12 @@ export interface CloudBackend {
   removeStudent(classId: string, sid: string): Promise<void>;
   resetPin(classId: string, sid: string): Promise<void>;
   listPortfolios(classId: string): Promise<Record<string, CloudRecord[]>>;
-  updateClassActivity(classId: string, patch: { focus?: ClassFocus | null; goal?: ClassGoal | null }): Promise<void>;
+  updateClassActivity(classId: string, patch: Partial<Pick<ClassInfo, 'focus' | 'goal' | 'extraMissions'>>): Promise<void>;
+  listPosts(classId: string): Promise<Post[]>;
+  reviewPost(classId: string, post: Post, approve: boolean): Promise<void>;
+  removeFromBoard(classId: string, postId: string): Promise<void>;
+  listReports(classId: string): Promise<{ postId: string; sid: string }[]>;
+  listReactions(classId: string): Promise<Reaction[]>;
   setClassStats(classId: string, stats: ClassPublicStats): Promise<void>;
   listFeedback(classId: string): Promise<Record<string, FeedbackMap>>;
   setFeedback(classId: string, sid: string, date: string, feedback: Feedback | null): Promise<void>;
@@ -120,6 +152,14 @@ export interface CloudBackend {
   getClassStats(classId: string): Promise<ClassPublicStats | null>;
   applyStatsDelta(classId: string, deltas: StatsDelta[]): Promise<void>;
   getFeedback(classId: string, sid: string): Promise<FeedbackMap>;
+  createPost(classId: string, post: Omit<Post, 'id' | 'status' | 'createdAt'>): Promise<Post>;
+  listMyPosts(classId: string, sid: string): Promise<Post[]>;
+  getBoard(classId: string): Promise<Entry[]>;
+  getInbox(classId: string, sid: string): Promise<Entry[]>;
+  // mine: 내가 누른 스티커, toMe: 내 글이 받은 스티커
+  getMyReactions(classId: string, sid: string): Promise<{ mine: Reaction[]; toMe: Reaction[] }>;
+  setReaction(classId: string, reaction: Omit<Reaction, 'kind'> & { kind: ReactionKind | null }): Promise<void>;
+  reportPost(classId: string, postId: string, sid: string): Promise<void>;
 }
 
 export class CloudError extends Error {

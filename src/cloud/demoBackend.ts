@@ -1,4 +1,4 @@
-import { ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, Student } from './types';
+import { Entry, Post, Reaction, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, Student } from './types';
 import { emptyStats } from './stats';
 import { adminKeyHash, normalizeCode, pinHash, randomCode, teacherKeyHash } from './util';
 
@@ -13,6 +13,9 @@ interface DemoClass {
   portfolios: Record<string, Record<string, CloudRecord>>;
   stats?: ClassPublicStats;
   feedback?: Record<string, FeedbackMap>;
+  posts?: Record<string, Post>;
+  reactions?: Record<string, Reaction>;
+  reports?: { postId: string; sid: string }[];
 }
 interface DemoState {
   invites: Record<string, InviteCode>;
@@ -194,6 +197,28 @@ export function createDemoBackend(): CloudBackend {
       else delete c.feedback[sid][date];
       save(s);
     },
+    async listPosts(classId) {
+      return Object.values(needTeacher(load(), classId).posts || {}).sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async reviewPost(classId, post, approve) {
+      const s = load();
+      const c = needTeacher(s, classId);
+      if (c.posts?.[post.id]) c.posts[post.id].status = approve ? 'approved' : 'rejected';
+      save(s);
+    },
+    async removeFromBoard(classId, postId) {
+      const s = load();
+      const c = needTeacher(s, classId);
+      if (c.posts?.[postId]) c.posts[postId].status = 'removed';
+      c.reports = (c.reports || []).filter((r) => r.postId !== postId);
+      save(s);
+    },
+    async listReports(classId) {
+      return needTeacher(load(), classId).reports || [];
+    },
+    async listReactions(classId) {
+      return Object.values(needTeacher(load(), classId).reactions || {});
+    },
     async deleteClass(classId) {
       await wait();
       const s = load();
@@ -275,6 +300,45 @@ export function createDemoBackend(): CloudBackend {
       const s = load();
       if (s.memberOf[classId] !== sid && !s.teacherOf.includes(classId)) throw new CloudError('permission', '권한이 없어요.');
       return need(s, classId).feedback?.[sid] || {};
+    },
+    async createPost(classId, post) {
+      await wait();
+      const s = load();
+      const c = need(s, classId);
+      if (s.memberOf[classId] !== post.from) throw new CloudError('permission', '권한이 없어요.');
+      const full: Post = { ...post, id: randomCode(10), status: 'pending', createdAt: Date.now() };
+      c.posts = { ...(c.posts || {}), [full.id]: full };
+      save(s);
+      return full;
+    },
+    async listMyPosts(classId, sid) {
+      return Object.values(need(load(), classId).posts || {}).filter((p) => p.from === sid).sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async getBoard(classId) {
+      await wait();
+      return Object.values(need(load(), classId).posts || {}).filter((p) => p.type === 'share' && p.status === 'approved').sort((a, b) => b.createdAt - a.createdAt) as Entry[];
+    },
+    async getInbox(classId, sid) {
+      return Object.values(need(load(), classId).posts || {}).filter((p) => p.type === 'note' && p.to === sid && p.status === 'approved').sort((a, b) => b.createdAt - a.createdAt) as Entry[];
+    },
+    async getMyReactions(classId, sid) {
+      const all = Object.values(need(load(), classId).reactions || {});
+      return { mine: all.filter((r) => r.sid === sid), toMe: all.filter((r) => r.author === sid) };
+    },
+    async setReaction(classId, r) {
+      const s = load();
+      const c = need(s, classId);
+      c.reactions = c.reactions || {};
+      const id = `${r.postId}_${r.sid}`;
+      if (r.kind) c.reactions[id] = { postId: r.postId, sid: r.sid, author: r.author, kind: r.kind };
+      else delete c.reactions[id];
+      save(s);
+    },
+    async reportPost(classId, postId, sid) {
+      const s = load();
+      const c = need(s, classId);
+      c.reports = [...(c.reports || []).filter((r) => !(r.postId === postId && r.sid === sid)), { postId, sid }];
+      save(s);
     }
   };
 }

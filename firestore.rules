@@ -23,6 +23,10 @@ service cloud.firestore {
     function isMember(cid) {
       return signedIn() && exists(/databases/$(db)/documents/classes/$(cid)/members/$(request.auth.uid));
     }
+    // 이 기기가 등록된 학생 번호(sid)
+    function memberSid(cid) {
+      return get(/databases/$(db)/documents/classes/$(cid)/members/$(request.auth.uid)).data.sid;
+    }
     // 이 기기가 학급 cid의 학생 sid로 등록되어 있고, 그 뒤로 비밀번호가 초기화되지 않았는지
     function isStudent(cid, sid) {
       let member = get(/databases/$(db)/documents/classes/$(cid)/members/$(request.auth.uid));
@@ -79,9 +83,9 @@ service cloud.firestore {
         && getAfter(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.usedCount
            == get(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.usedCount + 1
         && existsAfter(/databases/$(db)/documents/classes/$(cid)/teachers/$(request.auth.uid));
-      // 교사가 바꿀 수 있는 것: 학급 이름, 중점 학습자상(focus), 공동 목표(goal)
+      // 교사가 바꿀 수 있는 것: 학급 이름, 중점 학습자상(focus), 공동 목표(goal), 우리 반 미션(extraMissions)
       allow update: if isTeacher(cid)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'focus', 'goal'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'focus', 'goal', 'extraMissions'])
         && request.resource.data.name is string && request.resource.data.name.size() <= 40;
       allow delete: if isTeacher(cid) || isAdmin();
 
@@ -133,9 +137,42 @@ service cloud.firestore {
       }
       // 학급 합계(학생들에게 보여 주는 우리 반 현황): 개인별 수치 없이 합계만 담음
       // 학급에 참여한 기기와 교사가 읽고 씀. 교사 화면을 열 때마다 전체 기록으로 다시 계산해 바로잡음
-      match /public/{docId} {
+      match /public/stats {
         allow get, create, update: if isTeacher(cid) || isMember(cid);
         allow delete: if isTeacher(cid);
+      }
+      // 나눔 게시판(승인된 글 모음): 교사만 쓰고, 학급에 참여한 기기가 읽음
+      match /public/board {
+        allow get: if isTeacher(cid) || isMember(cid);
+        allow create, update, delete: if isTeacher(cid);
+      }
+      // 받은 칭찬 쪽지함(승인된 쪽지): 교사만 쓰고, 받는 학생 본인만 읽음
+      match /inbox/{sid} {
+        allow get: if isTeacher(cid) || isStudent(cid, sid);
+        allow create, update, delete: if isTeacher(cid);
+      }
+      // 학생이 쓴 쪽지·게시판 글(승인 대기함): 본인이 '대기' 상태로만 만들 수 있고, 본인 글과 교사만 읽음
+      match /posts/{pid} {
+        allow read: if isTeacher(cid) || (isMember(cid) && resource.data.from == memberSid(cid));
+        allow create: if isMember(cid)
+          && request.resource.data.from == memberSid(cid)
+          && request.resource.data.status == 'pending'
+          && request.resource.data.text is string && request.resource.data.text.size() <= 300;
+        allow update, delete: if isTeacher(cid);
+      }
+      // 공감 스티커: 누른 본인, 그 글의 글쓴이, 교사만 읽음 (다른 학생은 개수를 알 수 없음)
+      match /reactions/{rid} {
+        allow read: if isTeacher(cid)
+          || (isMember(cid) && (resource.data.sid == memberSid(cid) || resource.data.author == memberSid(cid)));
+        allow create, update: if isMember(cid)
+          && request.resource.data.sid == memberSid(cid)
+          && rid == request.resource.data.postId + '_' + request.resource.data.sid;
+        allow delete: if isTeacher(cid) || (isMember(cid) && resource.data.sid == memberSid(cid));
+      }
+      // 불편한 글 알리기: 학생이 만들고 교사만 읽음
+      match /reports/{rid} {
+        allow create, update: if isMember(cid) && request.resource.data.sid == memberSid(cid);
+        allow read, delete: if isTeacher(cid);
       }
       // 교사 피드백: 교사가 쓰고, 해당 학생 본인만 읽음
       match /feedback/{sid} {

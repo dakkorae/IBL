@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Users, RefreshCw, Target, Star, MessageCircleHeart, CalendarCheck, PartyPopper } from 'lucide-react';
 import { PROFILE_DATA, getLocalDateString } from '../data';
 import { cloudMode } from '../cloud';
@@ -6,12 +6,20 @@ import { goalProgress, myGoalCount } from '../cloud/stats';
 import { Feedback } from '../cloud/types';
 import RadarChart from '../components/RadarChart';
 import { usePortfolio } from '../state/PortfolioContext';
+import Community from './class/Community';
+
+const TABS = [
+  { key: 'home', name: '현황' },
+  { key: 'notes', name: '칭찬 쪽지' },
+  { key: 'board', name: '나눔 게시판' }
+] as const;
 
 const card = 'bg-white p-4 sm:p-6 rounded-2xl border border-slate-100 shadow-sm';
 
 // ⑥ 우리 반 화면: 학급 전체의 모습만 보여 줌 (친구 한 명 한 명의 숫자는 보이지 않음)
 export default function ClassView() {
-  const { classData, classDataState, classSession, history, refreshClassData, setCurrentView } = usePortfolio();
+  const { classData, classDataState, classSession, history, refreshClassData, setCurrentView, updateCommunity } = usePortfolio();
+  const [tab, setTab] = useState<(typeof TABS)[number]['key']>('home');
   const { info, stats, feedback } = classData;
 
   // 화면을 열 때마다 최신 정보로
@@ -52,6 +60,11 @@ export default function ClassView() {
   const mine = goal ? myGoalCount(goal, history) : 0;
   const pct = goal ? Math.min(100, Math.round((done / Math.max(1, goal.target)) * 100)) : 0;
   const reached = !!goal && done >= goal.target;
+  // 공동 목표 달성에 함께했으면 배지용으로 기억해 둠
+  useEffect(() => {
+    if (reached && mine > 0) updateCommunity({ goal: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reached, mine]);
 
   const totals = stats?.totals || {};
   const radarData = PROFILE_DATA.map((p) => ({
@@ -94,6 +107,18 @@ export default function ClassView() {
         <p role="alert" className="text-sm font-bold text-rose-600">⚠️ 우리 반 정보를 불러오지 못했어요. 잠시 후 새로 고침해 주세요.</p>
       )}
 
+      <div role="tablist" className="grid grid-cols-3 bg-slate-200/70 p-1 rounded-xl sm:inline-grid sm:w-96">
+        {TABS.map((t) => (
+          <button key={t.key} role="tab" aria-selected={tab === t.key} type="button" onClick={() => setTab(t.key)}
+            className={`h-10 rounded-lg text-sm font-extrabold transition-all cursor-pointer ${tab === t.key ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`}>
+            {t.name}
+          </button>
+        ))}
+      </div>
+
+      {tab !== 'home' && <Community mode={tab} />}
+
+      {tab === 'home' && (<>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* 이번 주 중점 학습자상 */}
         <div className={card}>
@@ -188,6 +213,7 @@ export default function ClassView() {
           )}
         </div>
       </div>
+      </>)}
     </div>
   );
 }

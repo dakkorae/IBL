@@ -10,11 +10,13 @@ import {
   getDocs,
   getFirestore,
   increment,
+  query,
+  where,
   setDoc,
   updateDoc,
   writeBatch
 } from 'firebase/firestore';
-import { ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, JoinResult, Student } from './types';
+import { Entry, Post, Reaction, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, JoinResult, Student } from './types';
 import { adminKeyHash, chunk, clean, normalizeCode, pinHash, randomCode, teacherKeyHash } from './util';
 
 export interface FirebaseConfig {
@@ -209,6 +211,40 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       await uid();
       await setDoc(subDoc(classId, 'feedback', sid), { items: { [date]: feedback ? clean(feedback) : deleteField() } }, { merge: true });
     },
+    async listPosts(classId) {
+      await uid();
+      return (await getDocs(sub(classId, 'posts'))).docs.map((d) => ({ id: d.id, ...d.data() }) as Post).sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async reviewPost(classId, post, approve) {
+      await uid();
+      const batch = writeBatch(db);
+      batch.update(subDoc(classId, 'posts', post.id), { status: approve ? 'approved' : 'rejected', reviewedAt: Date.now() });
+      if (approve) {
+        // 승인된 글은 학생들이 한 번에 읽는 문서(게시판 / 받는 학생의 쪽지함)에 옮겨 적음
+        const { status, ...entry } = post;
+        void status;
+        if (post.type === 'share') batch.set(subDoc(classId, 'public', 'board'), { posts: { [post.id]: clean(entry) } }, { merge: true });
+        else if (post.to) batch.set(subDoc(classId, 'inbox', post.to), { notes: { [post.id]: clean(entry) } }, { merge: true });
+      }
+      await batch.commit();
+    },
+    async removeFromBoard(classId, postId) {
+      await uid();
+      const batch = writeBatch(db);
+      batch.set(subDoc(classId, 'public', 'board'), { posts: { [postId]: deleteField() } }, { merge: true });
+      batch.update(subDoc(classId, 'posts', postId), { status: 'removed' });
+      const reports = await getDocs(query(sub(classId, 'reports'), where('postId', '==', postId)));
+      reports.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    },
+    async listReports(classId) {
+      await uid();
+      return (await getDocs(sub(classId, 'reports'))).docs.map((d) => d.data() as { postId: string; sid: string });
+    },
+    async listReactions(classId) {
+      await uid();
+      return (await getDocs(sub(classId, 'reactions'))).docs.map((d) => d.data() as Reaction);
+    },
     async deleteClass(classId) {
       const id = await uid();
       // 하위 문서를 모두 지운 뒤 학급 문서를 지우고, 마지막에 교사 등록을 지움
@@ -219,6 +255,9 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
         subDoc(classId, 'pins', d.id),
         subDoc(classId, 'students', d.id)
       ]);
+      for (const name of ['posts', 'reactions', 'reports']) (await getDocs(sub(classId, name))).docs.forEach((d) => refs.push(d.ref));
+      students.docs.forEach((d) => refs.push(subDoc(classId, 'inbox', d.id)));
+      refs.push(subDoc(classId, 'public', 'board'));
       const members = await getDocs(sub(classId, 'members'));
       members.docs.forEach((d) => refs.push(d.ref));
       const teachers = await getDocs(sub(classId, 'teachers'));
@@ -240,7 +279,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       const snap = await getDoc(classRef(cid));
       if (!snap.exists()) return null;
       const d = snap.data();
-      return { id: cid, name: String(d.name || ''), createdAt: Number(d.createdAt) || 0, focus: d.focus || null, goal: d.goal || null } as ClassInfo;
+      return { id: cid, name: String(d.name || ''), createdAt: Number(d.createdAt) || 0, focus: d.focus || null, goal: d.goal || null, extraMissions: d.extraMissions || null } as ClassInfo;
     },
     async listStudents(classId) {
       await uid();
@@ -343,6 +382,46 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       await uid();
       const snap = await getDoc(subDoc(classId, 'feedback', sid));
       return ((snap.data() || {}).items || {}) as FeedbackMap;
+    },
+    async createPost(classId, post) {
+      await uid();
+      const ref = doc(sub(classId, 'posts'));
+      const data = { ...clean(post), status: 'pending' as const, createdAt: Date.now() };
+      await setDoc(ref, data);
+      return { id: ref.id, ...data } as Post;
+    },
+    async listMyPosts(classId, sid) {
+      await uid();
+      const snap = await getDocs(query(sub(classId, 'posts'), where('from', '==', sid)));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Post).sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async getBoard(classId) {
+      await uid();
+      const snap = await getDoc(subDoc(classId, 'public', 'board'));
+      return (Object.values((snap.data() || {}).posts || {}) as Entry[]).sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async getInbox(classId, sid) {
+      await uid();
+      const snap = await getDoc(subDoc(classId, 'inbox', sid));
+      return (Object.values((snap.data() || {}).notes || {}) as Entry[]).sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async getMyReactions(classId, sid) {
+      await uid();
+      const [mine, toMe] = await Promise.all([
+        getDocs(query(sub(classId, 'reactions'), where('sid', '==', sid))),
+        getDocs(query(sub(classId, 'reactions'), where('author', '==', sid)))
+      ]);
+      return { mine: mine.docs.map((d) => d.data() as Reaction), toMe: toMe.docs.map((d) => d.data() as Reaction) };
+    },
+    async setReaction(classId, r) {
+      await uid();
+      const ref = subDoc(classId, 'reactions', `${r.postId}_${r.sid}`);
+      if (r.kind) await setDoc(ref, { postId: r.postId, sid: r.sid, author: r.author, kind: r.kind });
+      else await deleteDoc(ref);
+    },
+    async reportPost(classId, postId, sid) {
+      await uid();
+      await setDoc(subDoc(classId, 'reports', `${postId}_${sid}`), { postId, sid, at: Date.now() });
     }
   };
 

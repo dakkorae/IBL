@@ -21,6 +21,7 @@ export const BADGE_CATEGORIES: { key: BadgeCategory; title: string; emoji: strin
   { key: 'balance', title: '고른 성장 배지', emoji: '🌈', desc: '여러 학습자상을 골고루 실천하기' },
   { key: 'writing', title: '기록 배지', emoji: '✏️', desc: '실천 기록을 정성껏 남기기' },
   { key: 'mission', title: '미션 배지', emoji: '🧩', desc: '다양한 미션에 도전하기' },
+  { key: 'class', title: '우리 반 배지', emoji: '🏫', desc: '학급에 참여하면 도전할 수 있어요' },
   { key: 'fun', title: '깜짝 배지', emoji: '🎁', desc: '받기 전까지는 조건이 비밀!' }
 ];
 
@@ -106,7 +107,21 @@ const OTHER_BADGES: Badge[] = [
   ])
 ];
 
+// 학급에 참여한 학생에게만 나타나는 배지
+const CLASS_BADGES: Badge[] = def('class', [
+  { id: 'note_1', name: '첫 칭찬 쪽지', emoji: '💌', description: '친구의 멋진 모습을 발견해 알려 줬어요.', requirementDescription: '칭찬 쪽지 1번 전달', requiredCount: 1, unit: '번' },
+  { id: 'note_5', name: '칭찬 배달부', emoji: '📮', description: '칭찬을 배달하는 따뜻한 눈을 가졌어요.', requirementDescription: '칭찬 쪽지 5번 전달', requiredCount: 5, unit: '번' },
+  { id: 'share_1', name: '나눔의 시작', emoji: '📣', description: '나의 실천을 친구들과 나눴어요.', requirementDescription: '나눔 게시판에 글 1번 게시', requiredCount: 1, unit: '번' },
+  { id: 'goal_1', name: '함께 이룬 목표', emoji: '🤝', description: '우리 반이 함께 목표를 이뤘고, 나도 힘을 보탰어요!', requirementDescription: '학급 공동 목표 달성에 참여', requiredCount: 1, unit: '번' }
+]);
+
 export const BADGE_DEFINITIONS: Badge[] = [...PROFILE_BADGES, ...OTHER_BADGES];
+
+export interface CommunityCounts {
+  notes: number; // 승인되어 전달된 칭찬 쪽지 수
+  shares: number; // 게시판에 올라간 글 수
+  goal: boolean; // 공동 목표 달성에 참여했는지
+}
 export const TOTAL_BADGE_COUNT = BADGE_DEFINITIONS.length;
 
 // ---------------------------------------------------------------------
@@ -116,6 +131,7 @@ export const TOTAL_BADGE_COUNT = BADGE_DEFINITIONS.length;
 export interface BadgeContext {
   customMissionsByDate?: Record<string, Partial<Record<LearnerProfileKey, string>>>;
   rerollCountsByDate?: Record<string, Partial<Record<LearnerProfileKey, number>>>;
+  community?: CommunityCounts; // 학급에 참여 중일 때만 전달됨
 }
 
 const ALL_KEYS = PROFILE_DATA.map((p) => p.key);
@@ -249,7 +265,12 @@ export function computeBadgeProgress(history: DailyRecord[], ctx: BadgeContext =
 // 모든 배지의 정의 + 진행도 + 획득 여부
 export function evaluateBadges(history: DailyRecord[], ctx: BadgeContext = {}): BadgeStatus[] {
   const progress = computeBadgeProgress(history, ctx);
-  return BADGE_DEFINITIONS.map((b) => {
+  if (ctx.community) {
+    progress.note_1 = progress.note_5 = ctx.community.notes;
+    progress.share_1 = ctx.community.shares;
+    progress.goal_1 = ctx.community.goal ? 1 : 0;
+  }
+  return [...BADGE_DEFINITIONS, ...(ctx.community ? CLASS_BADGES : [])].map((b) => {
     const value = progress[b.id] || 0;
     return { ...b, progress: value, unlocked: value >= b.requiredCount };
   });

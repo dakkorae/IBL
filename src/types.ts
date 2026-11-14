@@ -44,7 +44,7 @@ export interface DailyRecord {
 export type ViewType = 'dashboard' | 'mission' | 'class' | 'profiles' | 'settings' | 'badges';
 export type TimePeriod = 'day' | 'week' | 'month' | '3months' | '6months' | '1year';
 
-export type BadgeCategory = 'profile' | 'streak' | 'balance' | 'writing' | 'mission' | 'fun';
+export type BadgeCategory = 'profile' | 'streak' | 'balance' | 'writing' | 'mission' | 'class' | 'fun';
 
 export interface Badge {
   id: string;

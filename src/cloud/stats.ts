@@ -67,3 +67,9 @@ export const FEEDBACK_STAMPS = [
   { stamp: '💪', label: '응원해요' },
   { stamp: '❤️', label: '고마워요' }
 ];
+
+export const REACTIONS: { kind: 'clap' | 'try' | 'thanks'; emoji: string; label: string }[] = [
+  { kind: 'clap', emoji: '👏', label: '멋져요' },
+  { kind: 'try', emoji: '💪', label: '나도 해 볼래요' },
+  { kind: 'thanks', emoji: '🤝', label: '고마워요' }
+];

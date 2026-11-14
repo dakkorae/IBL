@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { LearnerProfileKey, DailyRecord, ViewType, TimePeriod, Reflection, BadgeStatus } from '../types';
 import { PROFILE_DATA, generateMockHistory, calculateStats, getLocalDateString, parseDateString, getMissionForDay, getDefaultMissionForDay, getRandomMission, reconstructHistoryFromShared } from '../data';
-import { evaluateBadges } from '../badges';
+import { evaluateBadges, CommunityCounts } from '../badges';
 import { getDailyDrafts, saveDailyDraft, clearDailyDraft } from '../storage/drafts';
 import { getBackend, loadClassSession, saveClassSession } from '../cloud';
 import { ClassInfo, ClassPublicStats, ClassSession, CloudRecord, FeedbackMap } from '../cloud/types';
@@ -265,10 +265,35 @@ function usePortfolioState() {
     }
   }, [selectedDate, isCalendarOpen]);
 
+  // 학급 활동 횟수(승인된 쪽지·게시 글 수, 공동 목표 달성 참여): '우리 반 배지' 판정에 씀. 기기에 기억해 둠
+  const [classSession, setClassSession] = useState<ClassSession | null>(loadClassSession);
+  const [community, setCommunity] = useState<CommunityCounts>(() => {
+    try {
+      return { notes: 0, shares: 0, goal: false, ...JSON.parse(localStorage.getItem('ib_community') || '{}') };
+    } catch {
+      return { notes: 0, shares: 0, goal: false };
+    }
+  });
+  const updateCommunity = (patch: Partial<CommunityCounts>) =>
+    setCommunity((prev) => {
+      const next = { ...prev, ...patch };
+      if (JSON.stringify(next) === JSON.stringify(prev)) return prev;
+      localStorage.setItem('ib_community', JSON.stringify(next));
+      return next;
+    });
+
+  // 교사가 추가한 '우리 반 미션'을 오늘의 미션으로 고르기 (미션 바꾸기 횟수는 쓰지 않음)
+  const handleSetClassMission = (profileKey: LearnerProfileKey, mission: string) => {
+    if (isShareMode || (submittedToday && !isEditingToday)) return;
+    const next = { ...customMissionsByDate, [selectedDate]: { ...(customMissionsByDate[selectedDate] || {}), [profileKey]: mission } };
+    setCustomMissionsByDate(next);
+    localStorage.setItem('ib_custom_missions_by_date', JSON.stringify(next));
+  };
+
   // 배지 진행도와 획득 여부 (기록·미션 변경 내역이 바뀔 때마다 다시 계산)
   const badgeStatuses = useMemo(
-    () => evaluateBadges(history, { customMissionsByDate, rerollCountsByDate }),
-    [history, customMissionsByDate, rerollCountsByDate]
+    () => evaluateBadges(history, { customMissionsByDate, rerollCountsByDate, community: classSession ? community : undefined }),
+    [history, customMissionsByDate, rerollCountsByDate, classSession, community]
   );
   const unlockedBadgeCount = badgeStatuses.filter((b) => b.unlocked).length;
 
@@ -532,7 +557,7 @@ function usePortfolioState() {
     const finalHistory = [...updatedHistory, newRecord];
 
     // 이번 제출로 새로 받은 배지 찾기
-    const badgeCtx = { customMissionsByDate, rerollCountsByDate };
+    const badgeCtx = { customMissionsByDate, rerollCountsByDate, community: classSession ? community : undefined };
     const previousUnlockedIds = new Set(evaluateBadges(history, badgeCtx).filter((b) => b.unlocked).map((b) => b.id));
     const newlyUnlocked = evaluateBadges(finalHistory, badgeCtx).filter((b) => b.unlocked && !previousUnlockedIds.has(b.id));
 
@@ -719,7 +744,6 @@ function usePortfolioState() {
   // =====================================================================
   // 학급 연결: 기록은 지금처럼 이 기기에 먼저 저장하고, 학급에 참여 중이면 서버에도 올림
   // =====================================================================
-  const [classSession, setClassSession] = useState<ClassSession | null>(loadClassSession);
   const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'error'>('idle');
 
   const blockedWhileInClass = () => {
@@ -926,6 +950,8 @@ function usePortfolioState() {
     badgeStatuses,
     classData,
     classDataState,
+    handleSetClassMission,
+    updateCommunity,
     classSession,
     connectClass,
     refreshClassData: () => loadClassData(),

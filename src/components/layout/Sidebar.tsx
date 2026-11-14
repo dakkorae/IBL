@@ -1,5 +1,4 @@
 import { Trophy } from 'lucide-react';
-import { TOTAL_BADGE_COUNT } from '../../badges';
 import { usePortfolio } from '../../state/PortfolioContext';
 import { NAV_ITEMS } from './navItems';
 
@@ -11,6 +10,7 @@ export default function Sidebar() {
   const {
     classSession,
     currentView,
+    badgeStatuses,
     unlockedBadgeCount,
     selectedDate,
     setCurrentView,
@@ -95,7 +95,7 @@ export default function Sidebar() {
               )}
               {view === 'badges' && (
                 <span className="hidden lg:inline text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full border border-yellow-500/30 font-bold">
-                  {unlockedBadgeCount} / {TOTAL_BADGE_COUNT}
+                  {unlockedBadgeCount} / {badgeStatuses.length}
                 </span>
               )}
             </button>

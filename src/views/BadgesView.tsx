@@ -1,7 +1,7 @@
 import { Trophy, Lock, Sparkles } from 'lucide-react';
 import { BadgeStatus } from '../types';
 import { PROFILE_DATA } from '../data';
-import { BADGE_CATEGORIES, TOTAL_BADGE_COUNT } from '../badges';
+import { BADGE_CATEGORIES } from '../badges';
 import { usePortfolio } from '../state/PortfolioContext';
 
 const percentOf = (b: BadgeStatus) => Math.min(100, Math.round((b.progress / b.requiredCount) * 100));
@@ -66,6 +66,7 @@ function BadgeCard({ badge }: { badge: BadgeStatus; key?: string }) {
 // ④ 배지 전당 화면
 export default function BadgesView() {
   const { badgeStatuses, unlockedBadgeCount } = usePortfolio();
+  const TOTAL_BADGE_COUNT = badgeStatuses.length;
   const totalPct = Math.round((unlockedBadgeCount / TOTAL_BADGE_COUNT) * 100);
 
   // 곧 받을 수 있는 배지: 아직 못 받은 (깜짝 배지 제외) 배지 중 진행률이 높은 순
@@ -128,6 +129,7 @@ export default function BadgesView() {
 
       {BADGE_CATEGORIES.map((cat) => {
         const list = badgeStatuses.filter((b) => b.category === cat.key);
+        if (list.length === 0) return null;
         const got = list.filter((b) => b.unlocked).length;
 
         return (
