@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Users, Check, Loader2, LogOut, CloudOff, Cloud, ArrowLeft } from 'lucide-react';
+import { Users, Check, Loader2, LogOut, CloudOff, Cloud, ArrowLeft, Pencil } from 'lucide-react';
 import { cloudMode, errorMessage, getBackend } from '../../cloud';
-import { ClassInfo, ClassSession, CloudRecord, Student } from '../../cloud/types';
+import { ClassInfo, ClassSession, CloudRecord, NICKNAME_MAX, NICK_CHANGE_DAYS, Student } from '../../cloud/types';
 import { normalizeCode } from '../../cloud/util';
 import { usePortfolio } from '../../state/PortfolioContext';
+import { badWordMessage } from '../../filter';
 
-type Step = 'code' | 'pick' | 'pin' | 'data';
+type Step = 'code' | 'who' | 'data';
 
 const inputCls =
   'w-full h-12 px-4 text-base font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800 placeholder-slate-400';
@@ -14,15 +15,18 @@ const primaryBtn =
 const ghostBtn =
   'h-12 px-4 inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-600 text-sm font-bold border border-slate-200 rounded-xl transition-all cursor-pointer';
 
-// 설정 화면의 '학급 참여' 카드: 학급 코드 → 내 번호 → 비밀번호 → 기록 가져오기/올리기
+// 설정 화면의 '학급 참여' 카드: 학급 코드 → 닉네임·비밀번호(처음 등록 또는 다시 들어오기) → 기록 가져오기/올리기
 export default function ClassJoinCard() {
-  const { classSession, connectClass, disconnectClass, history, syncState } = usePortfolio();
+  const { classSession, classData, connectClass, disconnectClass, history, renameSelf, syncState } = usePortfolio();
 
   const [step, setStep] = useState<Step>('code');
   const [code, setCode] = useState('');
   const [info, setInfo] = useState<ClassInfo | null>(null);
-  const [students, setStudents] = useState<Student[]>([]);
+  const [isNew, setIsNew] = useState(true); // 처음 등록인지, 다시 들어오기인지
+  const [nickname, setNickname] = useState('');
   const [picked, setPicked] = useState<Student | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [newNick, setNewNick] = useState('');
   const [pin, setPin] = useState('');
   const [pin2, setPin2] = useState('');
   const [cloudRecords, setCloudRecords] = useState<CloudRecord[]>([]);
@@ -49,6 +53,7 @@ export default function ClassJoinCard() {
   const restart = () => {
     setStep('code');
     setPicked(null);
+    setNickname('');
     setPin('');
     setPin2('');
     setError('');
@@ -61,17 +66,16 @@ export default function ClassJoinCard() {
       const found = await backend.getClass(code);
       if (!found) throw new Error('학급 코드를 찾을 수 없어요. 선생님께 받은 코드를 다시 확인해 주세요.');
       setInfo(found);
-      setStudents(await backend.listStudents(found.id));
-      setStep('pick');
+      setStep('who');
     });
   };
 
-  const sessionOf = (): ClassSession => ({
+  const sessionOf = (st: Student | null = picked): ClassSession => ({
     classId: info!.id,
     className: info!.name,
-    sid: picked!.id,
-    number: picked!.number,
-    nickname: picked!.nickname
+    sid: st!.id,
+    number: st!.number,
+    nickname: st!.nickname
   });
 
   const finish = (mode: 'pull' | 'push' | 'fresh', records: CloudRecord[] = cloudRecords) =>
@@ -87,33 +91,70 @@ export default function ClassJoinCard() {
       restart();
     });
 
-  const submitPin = (e: React.FormEvent) => {
+  const submitWho = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!picked || !info) return;
+    if (!info) return;
+    const nick = nickname.trim();
+    if (!nick) return setError('닉네임을 입력해 주세요.');
     if (!/^\d{4}$/.test(pin)) return setError('비밀번호는 숫자 4자리로 입력해 주세요.');
-    if (!picked.claimed && pin !== pin2) return setError('두 번 입력한 비밀번호가 서로 달라요.');
+    if (isNew) {
+      const bad = badWordMessage(nick);
+      if (bad) return setError(bad);
+      if (pin !== pin2) return setError('두 번 입력한 비밀번호가 서로 달라요.');
+    }
     run(async () => {
       const backend = await getBackend();
-      const result = await backend.joinClass(info.id, picked.id, pin);
-      if (result === 'wrong-pin') {
-        throw new Error(
-          picked.claimed
-            ? '비밀번호가 맞지 않아요. 잊어버렸다면 선생님께 초기화를 부탁하세요.'
-            : '방금 다른 기기에서 이 번호의 비밀번호를 정했어요. 내 번호가 맞는지 확인해 주세요.'
-        );
+      let me: Student;
+      if (isNew) {
+        const r = await backend.registerStudent(info.id, nick, pin);
+        if (r.result !== 'ok') {
+          throw new Error(
+            r.result === 'taken'
+              ? '이미 있는 닉네임이에요. 다른 닉네임을 쓰거나, 내가 등록한 것이라면 ‘다시 들어오기’를 눌러 주세요.'
+              : '학급 정원이 다 찼어요. 선생님께 알려 주세요.'
+          );
+        }
+        me = r.student;
+      } else {
+        const found = (await backend.listStudents(info.id)).find((st) => st.nickname === nick);
+        if (!found) throw new Error('이 닉네임으로 등록된 친구가 없어요. 닉네임을 다시 확인하거나 ‘처음 등록’을 눌러 주세요.');
+        const result = await backend.joinClass(info.id, found.id, pin);
+        if (result === 'wrong-pin') throw new Error('비밀번호가 맞지 않아요. 잊어버렸다면 선생님께 초기화를 부탁하세요.');
+        if (result === 'not-found') throw new Error('명단에서 찾을 수 없어요. 선생님께 알려 주세요.');
+        me = { ...found, claimed: true };
       }
-      if (result === 'not-found') throw new Error('명단에서 이 번호를 찾을 수 없어요.');
-      const records = await backend.getPortfolio(info.id, picked.id);
+      setPicked(me);
+      const records = isNew ? [] : await backend.getPortfolio(info.id, me.id);
       setCloudRecords(records);
-      if (records.length > 0 && !hasRealLocal) return void (await connectAndNote('pull', records));
-      if (records.length === 0 && !hasRealLocal) return void (await connectAndNote('fresh', records));
+      if (records.length > 0 && !hasRealLocal) return void (await connectAndNote('pull', records, me));
+      if (records.length === 0 && !hasRealLocal) return void (await connectAndNote('fresh', records, me));
       setStep('data'); // 어느 기록을 쓸지 골라야 하는 경우
     });
   };
-  const connectAndNote = async (mode: 'pull' | 'fresh', records: CloudRecord[]) => {
-    await connectClass(sessionOf(), mode, records);
+  const connectAndNote = async (mode: 'pull' | 'fresh', records: CloudRecord[], me: Student) => {
+    await connectClass(sessionOf(me), mode, records);
     setNotice(mode === 'pull' ? `학급에 저장된 기록 ${records.length}일을 불러왔어요.` : '학급에 참여했어요. 오늘부터 기록을 시작해 보세요!');
     restart();
+  };
+
+  // 닉네임 바꾸기 (30일에 한 번)
+  const nickAt = classData.me?.nickAt || 0;
+  const nextChange = nickAt ? nickAt + NICK_CHANGE_DAYS * 86400000 : 0;
+  const canRename = Date.now() >= nextChange;
+  const submitRename = (e: React.FormEvent) => {
+    e.preventDefault();
+    const nick = newNick.trim();
+    if (!nick) return setError('닉네임을 입력해 주세요.');
+    if (nick === classSession?.nickname) return setRenaming(false);
+    const bad = badWordMessage(nick);
+    if (bad) return setError(bad);
+    run(async () => {
+      const r = await renameSelf(nick);
+      if (r === 'taken') throw new Error('이미 있는 닉네임이에요. 다른 닉네임을 써 주세요.');
+      if (r === 'too-soon') throw new Error(`닉네임은 ${NICK_CHANGE_DAYS}일에 한 번만 바꿀 수 있어요.`);
+      setRenaming(false);
+      setNotice(`닉네임을 ‘${nick}’(으)로 바꿨어요.`);
+    });
   };
 
   const cancelJoin = () =>
@@ -153,9 +194,7 @@ export default function ClassJoinCard() {
         <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-indigo-50/60 border border-indigo-100 rounded-xl">
           <div className="min-w-0">
             <p className="text-base font-black text-slate-800 truncate">{classSession.className}</p>
-            <p className="text-sm font-bold text-indigo-700 mt-0.5">
-              {classSession.number}번{classSession.nickname !== `${classSession.number}번` && ` · ${classSession.nickname}`}
-            </p>
+            <p className="text-sm font-bold text-indigo-700 mt-0.5 break-words">{classSession.nickname}</p>
             <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
               {syncState === 'syncing' && (<><Loader2 size={12} className="animate-spin" /> 서버와 맞추는 중…</>)}
               {syncState === 'idle' && (<><Cloud size={12} className="text-emerald-600" /> 학급 서버에 저장되고 있어요</>)}
@@ -180,6 +219,32 @@ export default function ClassJoinCard() {
             </div>
           )}
         </div>
+
+        {/* 닉네임 바꾸기 */}
+        {!renaming ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button type="button" disabled={!canRename} onClick={() => { setRenaming(true); setNewNick(classSession.nickname); setError(''); setNotice(''); }} className={`${ghostBtn} !h-10 disabled:opacity-50 disabled:cursor-not-allowed`}>
+              <Pencil size={14} /> 닉네임 바꾸기
+            </button>
+            <p className="text-[11px] text-slate-500">
+              {canRename
+                ? `닉네임은 ${NICK_CHANGE_DAYS}일에 한 번 바꿀 수 있어요.`
+                : `${new Date(nextChange).getMonth() + 1}월 ${new Date(nextChange).getDate()}일부터 다시 바꿀 수 있어요.`}
+            </p>
+          </div>
+        ) : (
+          <form onSubmit={submitRename} className="space-y-2 max-w-sm">
+            <label htmlFor="new-nick" className="block text-xs font-bold text-slate-600">새 닉네임 (바꾸면 {NICK_CHANGE_DAYS}일 뒤에 다시 바꿀 수 있어요)</label>
+            <input id="new-nick" value={newNick} maxLength={NICKNAME_MAX} onChange={(e) => setNewNick(e.target.value)} autoComplete="off" className={inputCls} />
+            <div className="flex gap-2">
+              <button type="submit" disabled={busy || !newNick.trim()} className={`${primaryBtn} flex-1`}>
+                {busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} 바꾸기
+              </button>
+              <button type="button" onClick={() => { setRenaming(false); setError(''); }} className={`${ghostBtn} flex-1`}>취소</button>
+            </div>
+          </form>
+        )}
+        {error && <p role="alert" className="text-xs font-bold text-rose-600">⚠️ {error}</p>}
       </div>
     );
   }
@@ -208,66 +273,63 @@ export default function ClassJoinCard() {
         </form>
       )}
 
-      {step === 'pick' && info && (
-        <div className="space-y-3">
+      {step === 'who' && info && (
+        <form onSubmit={submitWho} className="space-y-3 max-w-sm">
           <button type="button" onClick={restart} className="text-xs font-bold text-slate-500 inline-flex items-center gap-1 cursor-pointer">
             <ArrowLeft size={13} /> 학급 코드 다시 입력
           </button>
           <p className="text-sm font-bold text-slate-800">
-            <span className="text-indigo-700">{info.name}</span> — 내 번호를 골라 주세요.
+            <span className="text-indigo-700">{info.name}</span>
           </p>
-          <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 gap-2 max-h-72 overflow-y-auto pr-1">
-            {students.map((st) => (
-              <button
-                key={st.id}
-                type="button"
-                onClick={() => { setPicked(st); setPin(''); setPin2(''); setError(''); setStep('pin'); }}
-                className="h-14 px-2 rounded-xl border border-slate-200 bg-white hover:border-indigo-400 hover:bg-indigo-50 text-center cursor-pointer transition-all"
-              >
-                <span className="block text-sm font-black text-slate-800">{st.number}번</span>
-                {st.nickname !== `${st.number}번` && <span className="block text-[10px] text-slate-500 truncate">{st.nickname}</span>}
+          <div role="tablist" className="grid grid-cols-2 bg-slate-200/70 p-1 rounded-xl">
+            {[{ v: true, name: '처음 등록' }, { v: false, name: '다시 들어오기' }].map((t) => (
+              <button key={t.name} type="button" role="tab" aria-selected={isNew === t.v} onClick={() => { setIsNew(t.v); setError(''); }}
+                className={`h-10 rounded-lg text-sm font-extrabold transition-all cursor-pointer ${isNew === t.v ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`}>
+                {t.name}
               </button>
             ))}
           </div>
-        </div>
-      )}
-
-      {step === 'pin' && info && picked && (
-        <form onSubmit={submitPin} className="space-y-3 max-w-sm">
-          <button type="button" onClick={() => { setStep('pick'); setError(''); }} className="text-xs font-bold text-slate-500 inline-flex items-center gap-1 cursor-pointer">
-            <ArrowLeft size={13} /> 번호 다시 고르기
-          </button>
-          <p className="text-sm font-bold text-slate-800">
-            <span className="text-indigo-700">{info.name} {picked.number}번</span>
-            {picked.claimed ? ' — 비밀번호를 입력해 주세요.' : ' — 나만 아는 비밀번호(숫자 4자리)를 정해 주세요.'}
+          <p className="text-xs text-slate-500">
+            {isNew
+              ? '우리 반에서 쓸 닉네임과 나만 아는 비밀번호(숫자 4자리)를 정해 주세요.'
+              : '전에 등록한 닉네임과 비밀번호를 입력해 주세요. (다른 기기에서 이어 쓰거나, 나갔다가 다시 들어올 때)'}
           </p>
+          <input
+            value={nickname}
+            maxLength={NICKNAME_MAX}
+            onChange={(e) => setNickname(e.target.value)}
+            placeholder={isNew ? `닉네임 (${NICKNAME_MAX}글자까지)` : '등록한 닉네임'}
+            aria-label="닉네임"
+            autoComplete="off"
+            className={inputCls}
+          />
           <input
             type="password"
             inputMode="numeric"
             maxLength={4}
             value={pin}
             onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-            placeholder="숫자 4자리"
+            placeholder="비밀번호 (숫자 4자리)"
             aria-label="비밀번호"
             autoComplete="off"
-            className={`${inputCls} text-center tracking-[0.5em]`}
+            className={`${inputCls} text-center tracking-[0.3em]`}
           />
-          {!picked.claimed && (
+          {isNew && (
             <input
               type="password"
               inputMode="numeric"
               maxLength={4}
               value={pin2}
               onChange={(e) => setPin2(e.target.value.replace(/\D/g, ''))}
-              placeholder="한 번 더 입력"
+              placeholder="비밀번호 한 번 더"
               aria-label="비밀번호 확인"
               autoComplete="off"
-              className={`${inputCls} text-center tracking-[0.5em]`}
+              className={`${inputCls} text-center tracking-[0.3em]`}
             />
           )}
-          {!picked.claimed && <p className="text-[11px] text-slate-500">생일이나 1234처럼 쉬운 숫자는 피하고, 친구에게 알려 주지 마세요.</p>}
-          <button type="submit" disabled={busy || pin.length < 4} className={`${primaryBtn} w-full`}>
-            {busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} 참여하기
+          {isNew && <p className="text-[11px] text-slate-500">생일이나 1234처럼 쉬운 숫자는 피하고, 친구에게 알려 주지 마세요. 닉네임은 선생님과 반 친구들이 볼 수 있어요.</p>}
+          <button type="submit" disabled={busy || !nickname.trim() || pin.length < 4} className={`${primaryBtn} w-full`}>
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} {isNew ? '등록하고 참여하기' : '참여하기'}
           </button>
         </form>
       )}

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { TimePeriod } from '../types';
+import PeriodTabs, { PERIODS } from '../components/PeriodTabs';
 import { Users, RefreshCw, Target, Star, MessageCircleHeart, CalendarCheck, PartyPopper } from 'lucide-react';
-import { PROFILE_DATA, getLocalDateString } from '../data';
+import { PROFILE_DATA, getLocalDateString, getPastDateString } from '../data';
 import { cloudMode } from '../cloud';
 import { goalProgress, myGoalCount } from '../cloud/stats';
 import { Feedback } from '../cloud/types';
@@ -10,8 +12,8 @@ import Community from './class/Community';
 
 const TABS = [
   { key: 'home', name: '현황' },
-  { key: 'notes', name: '칭찬 쪽지' },
-  { key: 'board', name: '나눔 게시판' }
+  { key: 'praise', name: '칭찬 게시판' },
+  { key: 'share', name: '나눔 게시판' }
 ] as const;
 
 const card = 'bg-white p-4 sm:p-6 rounded-2xl border border-slate-100 shadow-sm';
@@ -20,6 +22,7 @@ const card = 'bg-white p-4 sm:p-6 rounded-2xl border border-slate-100 shadow-sm'
 export default function ClassView() {
   const { classData, classDataState, classSession, history, refreshClassData, setCurrentView, updateCommunity } = usePortfolio();
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('home');
+  const [period, setPeriod] = useState<TimePeriod>('1year');
   const { info, stats, feedback } = classData;
 
   // 화면을 열 때마다 최신 정보로
@@ -66,13 +69,24 @@ export default function ClassView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reached, mine]);
 
-  const totals = stats?.totals || {};
+  // 고른 기간(오늘·7일·14일…) 동안 우리 반이 실천한 횟수를 날짜별 합계에서 더함
+  const periodDays = PERIODS.find((p) => p.key === period)!.days;
+  const since = getPastDateString(periodDays - 1);
+  const totals: Record<string, number> = {};
+  let periodRecords = 0;
+  const days = stats?.days || {};
+  Object.keys(days).forEach((date) => {
+    if (date < since || date > today) return;
+    const day = days[date];
+    periodRecords += day.students || 0;
+    PROFILE_DATA.forEach((p) => (totals[p.key] = (totals[p.key] || 0) + ((day.keys || {})[p.key] || 0)));
+  });
   const radarData = PROFILE_DATA.map((p) => ({
     name: p.name,
     englishName: p.englishName,
     key: p.key,
-    value: totals[p.key] || 0,
-    percentage: stats && stats.records > 0 ? Math.round(((totals[p.key] || 0) / stats.records) * 100) : 0,
+    value: Math.max(0, totals[p.key] || 0),
+    percentage: periodRecords > 0 ? Math.round((Math.max(0, totals[p.key] || 0) / periodRecords) * 100) : 0,
     color: p.color,
     emoji: p.emoji
   }));
@@ -180,7 +194,15 @@ export default function ClassView() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* 학급 전체 레이더 */}
         {stats && stats.records > 0 ? (
-          <RadarChart data={radarData} maxSubmittedDays={radarMax} title="우리 반 학습자상" subtitle="우리 반 모두의 실천을 더한 모양" />
+          <div className="space-y-4 sm:space-y-6 min-w-0">
+            <PeriodTabs value={period} onChange={setPeriod} label="레이더 기간" />
+            <RadarChart
+              data={radarData}
+              maxSubmittedDays={radarMax}
+              title="우리 반 학습자상"
+              subtitle={radarMax > 0 ? '우리 반 모두의 실천을 더한 모양' : '이 기간에는 아직 기록이 없어요'}
+            />
+          </div>
         ) : (
           <div className={`${card} flex items-center justify-center text-sm text-slate-500 text-center min-h-48`}>
             <span>

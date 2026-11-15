@@ -11,7 +11,7 @@ export default function BadgeUnlockModal() {
     setShowBadgeUnlockModal,
     setShowCelebrateModal,
     showBadgeUnlockModal,
-    userInfo
+    displayName
   } = usePortfolio();
 
   return (
@@ -48,7 +48,7 @@ export default function BadgeUnlockModal() {
                   명예로운 업적 잠금 해제!
                 </span>
                 <h3 className="text-xl sm:text-2xl font-black text-white pt-2 leading-tight">
-                  대단해요, {userInfo.name} 어린이!
+                  대단해요, {displayName} 어린이!
                 </h3>
                 <p className="text-xs text-indigo-300 font-medium">
                   끊임없는 실천과 성찰로 영광스러운 배지를 획득했습니다!

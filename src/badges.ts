@@ -109,8 +109,8 @@ const OTHER_BADGES: Badge[] = [
 
 // 학급에 참여한 학생에게만 나타나는 배지
 const CLASS_BADGES: Badge[] = def('class', [
-  { id: 'note_1', name: '첫 칭찬 쪽지', emoji: '💌', description: '친구의 멋진 모습을 발견해 알려 줬어요.', requirementDescription: '칭찬 쪽지 1번 전달', requiredCount: 1, unit: '번' },
-  { id: 'note_5', name: '칭찬 배달부', emoji: '📮', description: '칭찬을 배달하는 따뜻한 눈을 가졌어요.', requirementDescription: '칭찬 쪽지 5번 전달', requiredCount: 5, unit: '번' },
+  { id: 'note_1', name: '첫 칭찬 글', emoji: '💌', description: '친구의 멋진 모습을 발견해 알려 줬어요.', requirementDescription: '칭찬 게시판에 글 1번 올리기', requiredCount: 1, unit: '번' },
+  { id: 'note_5', name: '칭찬 배달부', emoji: '📮', description: '칭찬을 배달하는 따뜻한 눈을 가졌어요.', requirementDescription: '칭찬 게시판에 글 5번 올리기', requiredCount: 5, unit: '번' },
   { id: 'share_1', name: '나눔의 시작', emoji: '📣', description: '나의 실천을 친구들과 나눴어요.', requirementDescription: '나눔 게시판에 글 1번 게시', requiredCount: 1, unit: '번' },
   { id: 'goal_1', name: '함께 이룬 목표', emoji: '🤝', description: '우리 반이 함께 목표를 이뤘고, 나도 힘을 보탰어요!', requirementDescription: '학급 공동 목표 달성에 참여', requiredCount: 1, unit: '번' }
 ]);
@@ -118,7 +118,7 @@ const CLASS_BADGES: Badge[] = def('class', [
 export const BADGE_DEFINITIONS: Badge[] = [...PROFILE_BADGES, ...OTHER_BADGES];
 
 export interface CommunityCounts {
-  notes: number; // 승인되어 전달된 칭찬 쪽지 수
+  notes: number; // 칭찬 게시판에 올린 글 수
   shares: number; // 게시판에 올라간 글 수
   goal: boolean; // 공동 목표 달성에 참여했는지
 }

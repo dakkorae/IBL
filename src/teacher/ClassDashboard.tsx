@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Copy, Check, RefreshCw, Loader2, Users, CalendarCheck, Target, Eye, X, Download, UserPlus, KeyRound, Trash2, Pencil } from 'lucide-react';
+import { ArrowLeft, Copy, Check, RefreshCw, Loader2, Users, CalendarCheck, Target, Eye, X, Download, KeyRound, Trash2, Pencil } from 'lucide-react';
 import { PROFILE_DATA, getLocalDateString, parseDateString } from '../data';
 import { errorMessage, getBackend } from '../cloud';
-import { ClassGoal, ClassInfo, CloudRecord, Feedback, FeedbackMap, Student } from '../cloud/types';
+import { ClassGoal, ClassInfo, CloudRecord, Feedback, FeedbackMap, MAX_CLASS_STUDENTS, NICKNAME_MAX, Student } from '../cloud/types';
+import { badWordMessage } from '../filter';
 import { FEEDBACK_STAMPS, computeStats, goalProgress } from '../cloud/stats';
 import RadarChart from '../components/RadarChart';
 import { StudentStat, buildClassStats, displayName, recentSchoolDays } from './stats';
@@ -319,6 +320,8 @@ function FeedbackEditor({ classId, sid, date, value, onSaved }: { classId: strin
   const dirty = stamp !== (value?.stamp || '') || text.trim() !== (value?.text || '');
 
   const save = async (fb: Feedback | null) => {
+    const bad = badWordMessage(fb?.text);
+    if (bad) return setError(bad);
     setBusy(true);
     setError('');
     try {
@@ -465,6 +468,8 @@ function Activity({ classId, info, progress, onChange }: { classId: string; info
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const save = async (patch: Partial<Pick<ClassInfo, 'focus' | 'goal' | 'extraMissions'>>, text: string) => {
+    const bad = badWordMessage(patch.focus?.note, patch.goal?.title, ...Object.values(patch.extraMissions || {}).flatMap((list) => list || []));
+    if (bad) return setMsg({ ok: false, text: bad });
     setBusy(true);
     setMsg(null);
     try {
@@ -614,7 +619,6 @@ function Manage({ classId, info, students, reload, onRenamed, onGone }: {
       setBusy(false);
     }
   };
-  const nextNumber = Math.max(0, ...students.map((s) => s.number)) + 1;
 
   return (
     <div className="space-y-4">
@@ -627,13 +631,19 @@ function Manage({ classId, info, students, reload, onRenamed, onGone }: {
         <h2 className="text-sm font-extrabold text-slate-900">학생 참여 방법</h2>
         <ol className="mt-2 text-sm text-slate-600 space-y-1 list-decimal list-inside leading-relaxed">
           <li>학생 화면의 <b>환경 설정 → 학급 참여</b>에서 학급 코드 <b className="font-mono tracking-widest text-indigo-700">{classId}</b> 입력</li>
-          <li>자기 번호를 고르고, 숫자 4자리 비밀번호를 스스로 정하기</li>
-          <li>다른 기기에서는 같은 번호와 비밀번호로 들어오면 기록이 이어져요</li>
+          <li><b>처음 등록</b>을 눌러 닉네임과 숫자 4자리 비밀번호를 스스로 정하기</li>
+          <li>다른 기기에서는 <b>다시 들어오기</b>에서 같은 닉네임과 비밀번호를 넣으면 기록이 이어져요</li>
+          <li>학생은 닉네임을 30일에 한 번 바꿀 수 있고, 선생님은 아래 명단에서 언제든 바꿀 수 있어요</li>
         </ol>
       </div>
 
       {/* 학급 이름 */}
-      <form className={`${card} p-4 sm:p-5`} onSubmit={(e) => { e.preventDefault(); if (name.trim()) run(async (b) => { await b.updateClassName(classId, name); onRenamed(name.trim()); }, '학급 이름을 바꿨어요.'); }}>
+      <form className={`${card} p-4 sm:p-5`} onSubmit={(e) => {
+        e.preventDefault();
+        const bad = badWordMessage(name);
+        if (bad) return setError(bad);
+        if (name.trim()) run(async (b) => { await b.updateClassName(classId, name); onRenamed(name.trim()); }, '학급 이름을 바꿨어요.');
+      }}>
         <label className={label} htmlFor="m-name">학급 이름</label>
         <div className="flex flex-col sm:flex-row gap-2">
           <input id="m-name" className={input} value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
@@ -645,29 +655,35 @@ function Manage({ classId, info, students, reload, onRenamed, onGone }: {
       <div className={`${card} p-4 sm:p-5`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-extrabold text-slate-900">학생 명단 ({students.length}명)</h2>
-            <p className="text-xs text-slate-500 mt-0.5">별명은 선택 사항이에요. 실명 대신 번호만 써도 됩니다.</p>
+            <h2 className="text-sm font-extrabold text-slate-900">학생 명단 ({students.length}명 / 최대 {info.maxStudents || MAX_CLASS_STUDENTS}명)</h2>
+            <p className="text-xs text-slate-500 mt-0.5">학생이 등록하면 여기에 나타나요. 앞의 숫자는 등록한 순서예요.</p>
           </div>
-          <button type="button" disabled={busy || students.length >= 40} onClick={() => run(async (b) => { await b.addStudent(classId, nextNumber, ''); await reload(); }, `${nextNumber}번 학생을 추가했어요.`)} className={btnGhost}>
-            <UserPlus size={15} /> {nextNumber}번 추가
-          </button>
         </div>
+        {students.length === 0 && <p className="mt-3 text-sm text-slate-500">아직 등록한 학생이 없어요. 학급 코드를 학생들에게 알려 주세요.</p>}
         <ul className="mt-3 divide-y divide-slate-100">
           {students.map((s) => (
             <li key={s.id} className="py-2.5 flex flex-wrap items-center gap-2">
-              <span className="w-12 shrink-0 text-sm font-black text-slate-900">{s.number}번</span>
+              <span className="w-8 shrink-0 text-xs font-bold text-slate-400 text-right">{s.number}</span>
               {editing === s.id ? (
-                <form className="flex-1 min-w-48 flex gap-2" onSubmit={(e) => { e.preventDefault(); run(async (b) => { await b.updateStudentNickname(classId, s.id, nick || `${s.number}번`); setEditing(null); await reload(); }); }}>
-                  <input className={`${input} !h-10`} value={nick} maxLength={12} autoFocus onChange={(e) => setNick(e.target.value)} placeholder="별명 (비우면 번호만)" aria-label={`${s.number}번 별명`} />
+                <form className="flex-1 min-w-48 flex gap-2" onSubmit={(e) => {
+                  e.preventDefault();
+                  const next = nick.trim();
+                  if (!next) return setError('닉네임을 입력해 주세요.');
+                  if (students.some((o) => o.id !== s.id && o.nickname === next)) return setError('이미 있는 닉네임이에요.');
+                  const bad = badWordMessage(next);
+                  if (bad) return setError(bad);
+                  run(async (b) => { await b.updateStudentNickname(classId, s.id, next); setEditing(null); await reload(); }, `닉네임을 ‘${next}’(으)로 바꿨어요. 학생 화면에는 다음에 열 때 반영돼요.`);
+                }}>
+                  <input className={`${input} !h-10`} value={nick} maxLength={NICKNAME_MAX} autoFocus onChange={(e) => setNick(e.target.value)} placeholder="닉네임" aria-label={`${s.nickname} 닉네임`} />
                   <button type="submit" disabled={busy} className={`${btnPrimary} !h-10 !px-3 shrink-0`}>저장</button>
                   <button type="button" onClick={() => setEditing(null)} className={`${btnGhost} !h-10 !px-3 shrink-0`}>취소</button>
                 </form>
               ) : confirm?.sid === s.id ? (
                 <div className="flex-1 min-w-48 flex flex-wrap items-center gap-2">
                   <span className="text-xs font-bold text-slate-700 break-keep">
-                    {confirm.action === 'reset' ? '비밀번호를 초기화할까요? 학생이 새 비밀번호를 다시 정하게 돼요. 기록은 그대로예요.' : '이 학생과 기록을 모두 삭제할까요? 되돌릴 수 없어요.'}
+                    {confirm.action === 'reset' ? '비밀번호를 초기화할까요? 학생이 ‘다시 들어오기’에서 같은 닉네임으로 새 비밀번호를 넣으면 그 비밀번호로 정해져요. 기록은 그대로예요.' : '이 학생과 기록을 모두 삭제할까요? 되돌릴 수 없어요.'}
                   </span>
-                  <button type="button" disabled={busy} className={`${btnDanger} !h-10 !px-3`} onClick={() => run(async (b) => { if (confirm.action === 'reset') await b.resetPin(classId, s.id); else await b.removeStudent(classId, s.id); setConfirm(null); await reload(); }, confirm.action === 'reset' ? `${s.number}번 비밀번호를 초기화했어요.` : `${s.number}번 학생을 삭제했어요.`)}>
+                  <button type="button" disabled={busy} className={`${btnDanger} !h-10 !px-3`} onClick={() => run(async (b) => { if (confirm.action === 'reset') await b.resetPin(classId, s.id); else await b.removeStudent(classId, s.id); setConfirm(null); await reload(); }, confirm.action === 'reset' ? `${s.nickname}의 비밀번호를 초기화했어요.` : `${s.nickname} 학생을 삭제했어요.`)}>
                     {confirm.action === 'reset' ? '초기화' : '삭제'}
                   </button>
                   <button type="button" onClick={() => setConfirm(null)} className={`${btnGhost} !h-10 !px-3`}>취소</button>
@@ -675,13 +691,13 @@ function Manage({ classId, info, students, reload, onRenamed, onGone }: {
               ) : (
                 <>
                   <span className="flex-1 min-w-0 text-sm text-slate-700 truncate">
-                    {s.nickname !== `${s.number}번` ? s.nickname : <span className="text-slate-400">별명 없음</span>}
-                    <span className={`ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full ${s.claimed ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>{s.claimed ? '입장함' : '미입장'}</span>
+                    <b className="font-bold text-slate-900">{s.nickname}</b>
+                    {!s.claimed && <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">비밀번호 없음</span>}
                   </span>
                   <span className="flex gap-1 shrink-0">
-                    <button type="button" title="별명 바꾸기" aria-label={`${s.number}번 별명 바꾸기`} onClick={() => { setEditing(s.id); setNick(s.nickname !== `${s.number}번` ? s.nickname : ''); setConfirm(null); }} className="w-10 h-10 rounded-lg hover:bg-slate-100 text-slate-500 flex items-center justify-center cursor-pointer"><Pencil size={15} /></button>
-                    <button type="button" title="비밀번호 초기화" aria-label={`${s.number}번 비밀번호 초기화`} disabled={!s.claimed} onClick={() => setConfirm({ sid: s.id, action: 'reset' })} className="w-10 h-10 rounded-lg hover:bg-slate-100 text-slate-500 flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"><KeyRound size={15} /></button>
-                    <button type="button" title="학생 삭제" aria-label={`${s.number}번 학생 삭제`} onClick={() => setConfirm({ sid: s.id, action: 'remove' })} className="w-10 h-10 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center cursor-pointer"><Trash2 size={15} /></button>
+                    <button type="button" title="닉네임 바꾸기" aria-label={`${s.nickname} 닉네임 바꾸기`} onClick={() => { setEditing(s.id); setNick(s.nickname); setConfirm(null); setError(''); }} className="w-10 h-10 rounded-lg hover:bg-slate-100 text-slate-500 flex items-center justify-center cursor-pointer"><Pencil size={15} /></button>
+                    <button type="button" title="비밀번호 초기화" aria-label={`${s.nickname} 비밀번호 초기화`} disabled={!s.claimed} onClick={() => setConfirm({ sid: s.id, action: 'reset' })} className="w-10 h-10 rounded-lg hover:bg-slate-100 text-slate-500 flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"><KeyRound size={15} /></button>
+                    <button type="button" title="학생 삭제" aria-label={`${s.nickname} 학생 삭제`} onClick={() => setConfirm({ sid: s.id, action: 'remove' })} className="w-10 h-10 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center cursor-pointer"><Trash2 size={15} /></button>
                   </span>
                 </>
               )}

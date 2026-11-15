@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { GraduationCap, Plus, KeyRound, Loader2, ChevronRight, ArrowLeft, FlaskConical } from 'lucide-react';
 import { cloudMode, errorMessage, getBackend, loadTeacherClasses, saveTeacherClasses } from '../cloud';
 import { normalizeCode } from '../cloud/util';
+import { MAX_CLASS_STUDENTS } from '../cloud/types';
+import { badWordMessage } from '../filter';
 import ClassDashboard from './ClassDashboard';
 import { btnGhost, btnPrimary, card, input, label } from './ui';
 
@@ -18,7 +20,7 @@ export default function TeacherApp() {
   // 개설 양식
   const [invite, setInvite] = useState('');
   const [name, setName] = useState('');
-  const [count, setCount] = useState('25');
+  const [count, setCount] = useState('30');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   // 다른 기기에서 만든 학급 열기
@@ -47,12 +49,14 @@ export default function TeacherApp() {
     e.preventDefault();
     const n = Number(count);
     if (!name.trim()) return setError('학급 이름을 입력해 주세요.');
-    if (!Number.isInteger(n) || n < 1 || n > 40) return setError('학생 수는 1명부터 40명까지 입력해 주세요.');
+    if (!Number.isInteger(n) || n < 1 || n > MAX_CLASS_STUDENTS) return setError(`최대 학생 수는 1명부터 ${MAX_CLASS_STUDENTS}명까지 입력해 주세요.`);
+    const bad = badWordMessage(name);
+    if (bad) return setError(bad);
     if (pw.length < 6) return setError('교사 비밀번호는 6자 이상으로 정해 주세요.');
     if (pw !== pw2) return setError('두 번 입력한 비밀번호가 서로 달라요.');
     run(async () => {
       const backend = await getBackend();
-      const info = await backend.createClass({ inviteCode: invite, name, studentCount: n, password: pw });
+      const info = await backend.createClass({ inviteCode: invite, name, maxStudents: n, password: pw });
       remember(info.id, info.name);
       setMode('home');
       setPw('');
@@ -157,7 +161,7 @@ export default function TeacherApp() {
         <form onSubmit={createClass} className={`${card} p-4 sm:p-6 space-y-4`}>
           <div>
             <h1 className="text-lg font-black text-slate-900">새 학급 개설</h1>
-            <p className="text-sm text-slate-500 mt-1">개설 코드는 연구회 관리자에게 받은 코드예요. 학생 이름 대신 번호로 명단이 만들어집니다.</p>
+            <p className="text-sm text-slate-500 mt-1">개설 코드는 연구회 관리자에게 받은 코드예요. 학생은 학급 코드로 들어와 닉네임과 비밀번호를 스스로 정합니다.</p>
           </div>
           <div>
             <label className={label} htmlFor="t-invite">개설 코드</label>
@@ -169,8 +173,8 @@ export default function TeacherApp() {
               <input id="t-name" className={input} value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 5학년 3반" maxLength={40} required />
             </div>
             <div>
-              <label className={label} htmlFor="t-count">학생 수</label>
-              <input id="t-count" className={input} type="number" min={1} max={40} value={count} onChange={(e) => setCount(e.target.value)} required />
+              <label className={label} htmlFor="t-count">최대 학생 수 (100명까지)</label>
+              <input id="t-count" className={input} type="number" min={1} max={MAX_CLASS_STUDENTS} value={count} onChange={(e) => setCount(e.target.value)} required />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

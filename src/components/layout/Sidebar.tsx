@@ -16,7 +16,8 @@ export default function Sidebar() {
     setCurrentView,
     submittedToday,
     todayStr,
-    userInfo
+    userInfo,
+    displayName
   } = usePortfolio();
 
   return (
@@ -37,18 +38,14 @@ export default function Sidebar() {
         <div className="flex items-center justify-center lg:justify-start lg:space-x-3">
           <div
             className="w-10 h-10 shrink-0 rounded-full bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 text-lg font-bold"
-            title={`${userInfo.grade}학년 ${userInfo.classroom}반 ${userInfo.name}`}
+            title={classSession ? `${classSession.className} ${displayName}` : `${userInfo.grade}학년 ${userInfo.classroom}반 ${userInfo.name}`}
           >
-            {userInfo.name[0]}
+            {[...displayName][0] || '🙂'}
           </div>
           <div className="hidden lg:block min-w-0">
             <div className="text-xs text-slate-400 truncate">{classSession ? classSession.className : userInfo.school}</div>
             <div className="text-sm font-bold text-white truncate">
-              {classSession
-                ? classSession.nickname === `${classSession.number}번`
-                  ? classSession.nickname
-                  : `${classSession.number}번 ${classSession.nickname}`
-                : `${userInfo.grade}학년 ${userInfo.classroom}반 ${userInfo.name}`}
+              {classSession ? displayName : `${userInfo.grade}학년 ${userInfo.classroom}반 ${userInfo.name}`}
             </div>
           </div>
         </div>

@@ -1,7 +1,7 @@
-import { ChevronRight, ChevronLeft, Calendar, Share2 } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Calendar } from 'lucide-react';
 import { usePortfolio } from '../../state/PortfolioContext';
 
-// 상단 헤더: 화면 제목, 총 실천 횟수, 공유 버튼, 날짜 이동
+// 상단 헤더: 화면 제목, 총 실천 횟수, 날짜 이동
 // - 넓은 화면(xl): 날짜 · 제목 · 버튼이 한 줄
 // - 그보다 좁은 화면: 윗줄에 제목과 버튼, 아랫줄에 날짜 이동
 export default function Header() {
@@ -10,7 +10,6 @@ export default function Header() {
     getFormattedDate,
     handleNextDate,
     handlePrevDate,
-    handleSharePortfolio,
     selectedDate,
     setCurrentView,
     setIsCalendarOpen,
@@ -36,7 +35,7 @@ export default function Header() {
         </h2>
       </div>
 
-      {/* Quick Stat Badge & Share Button */}
+      {/* Quick Stat Badge */}
       <div className="order-2 xl:order-3 flex items-center gap-2 shrink-0">
         <div className="bg-slate-50 border border-slate-100 rounded-2xl px-3 h-10 flex items-center gap-1.5">
           <span className="text-xs font-medium text-slate-500">
@@ -44,15 +43,6 @@ export default function Header() {
           </span>
           <span className="text-sm font-extrabold text-indigo-600">{totalMissionsCount}회</span>
         </div>
-
-        <button
-          onClick={handleSharePortfolio}
-          aria-label="포트폴리오 공유"
-          className="bg-indigo-600 hover:bg-indigo-700 text-white w-10 sm:w-auto sm:px-4 h-10 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer"
-        >
-          <Share2 size={15} />
-          <span className="hidden sm:inline">포트폴리오 공유</span>
-        </button>
       </div>
 
       {/* Calendar Controls */}

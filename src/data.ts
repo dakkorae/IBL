@@ -424,29 +424,3 @@ export function calculateStats(history: DailyRecord[], period: TimePeriod, baseD
       : '0'
   };
 }
-
-// Reconstruct historical records from cumulative profile counts for read-only share view
-export function reconstructHistoryFromShared(stats: Record<LearnerProfileKey, number>): DailyRecord[] {
-  const records: DailyRecord[] = [];
-  const keys = Object.keys(stats) as LearnerProfileKey[];
-  const maxCount = Math.max(...Object.values(stats), 1);
-  
-  for (let d = 0; d < maxCount; d++) {
-    const completedThisDay: LearnerProfileKey[] = [];
-    keys.forEach(key => {
-      if (stats[key] > d) {
-        completedThisDay.push(key);
-      }
-    });
-    
-    records.push({
-      date: getPastDateString(maxCount - d),
-      completed: completedThisDay,
-      submitted: true,
-      memo: '공유된 포트폴리오의 실천 이력입니다.'
-    });
-  }
-  return records;
-}
-
-

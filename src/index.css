@@ -13,6 +13,12 @@
 }
 
 
+/* 한글은 글자 중간이 아니라 낱말(띄어쓰기) 단위로 줄을 바꿈. 아주 긴 낱말만 예외로 중간에서 끊음 */
+body {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
 /* --- 글꼴 테마 (설정 > 화면 테마) --- */
 :root[data-font="gowun"] {
   --font-sans: "Gowun Dodum", "Pretendard", sans-serif;

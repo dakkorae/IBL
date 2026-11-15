@@ -147,14 +147,15 @@ export default function MissionView() {
                 } ${disabled ? 'cursor-not-allowed opacity-85' : 'cursor-pointer'}`}
               >
                 {/* Upper line: Emoji, Badge, Actions */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5 min-w-0">
+                {/* 아주 좁은 화면에서는 버튼 줄이 아래로 내려가 겹치지 않음 */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1 basis-32">
                     <span className="text-3xl shrink-0">{profile.emoji}</span>
                     <div className="min-w-0">
                       <h4 className="font-bold text-slate-800 text-[15px] sm:text-base leading-snug break-keep">
                         {profile.name}
                       </h4>
-                      <p className="mt-0.5 flex items-center gap-1.5">
+                      <p className="mt-0.5 flex flex-wrap items-center gap-1">
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${profile.bgColor} ${profile.textColor}`}>
                           {profile.englishName}
                         </span>
@@ -169,7 +170,7 @@ export default function MissionView() {
                   </div>
 
                   {/* Right Controls: Per-Category Reroll Button + Checkbox */}
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0 ml-auto">
                     {/* Mission Reroll Button with per-category remaining count */}
                     <button
                       type="button"

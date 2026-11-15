@@ -44,6 +44,35 @@ service cloud.firestore {
         && member.data.pinHash == getAfter(/databases/$(db)/documents/classes/$(cid)/pins/$(sid)).data.pinHash;
     }
 
+    // 닉네임: 1~12글자
+    function validNick(nick) {
+      return nick is string && nick.size() >= 1 && nick.size() <= 12;
+    }
+    // 게시판(칭찬·나눔)에 학생이 글을 올릴 때: 자기 이름으로 된 글 하나만 더할 수 있음 (남의 글 수정·삭제 불가)
+    // - 문서 모양: { posts: { 글ID: 글 }, last: 방금 넣은 글ID }
+    function ownEntry(cid) {
+      let pid = request.resource.data.last;
+      let entry = request.resource.data.posts[pid];
+      return isMember(cid)
+        && pid is string
+        && entry.id == pid
+        && entry.from == memberSid(cid)
+        && entry.text is string && entry.text.size() <= 300
+        && entry.fromName is string && entry.fromName.size() <= 12
+        && entry.get('toName', '') is string && entry.get('toName', '').size() <= 20;
+    }
+    function boardCreate(cid) {
+      return ownEntry(cid)
+        && request.resource.data.keys().hasOnly(['posts', 'last'])
+        && request.resource.data.posts.keys().hasOnly([request.resource.data.last]);
+    }
+    function boardAdd(cid) {
+      return ownEntry(cid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['posts', 'last'])
+        && !(request.resource.data.last in resource.data.get('posts', {}))
+        && request.resource.data.posts.diff(resource.data.get('posts', {})).affectedKeys().hasOnly([request.resource.data.last]);
+    }
+
     // ---------- 관리자 ----------
     // config/admin { keyHash } 는 콘솔에서 직접 한 번 만들어 둠. 앱에서는 읽지도 쓰지도 못함
     match /config/{docId} {
@@ -75,8 +104,11 @@ service cloud.firestore {
       allow list: if isAdmin();
       // 개설: 유효한 개설 코드가 있어야 하고, 같은 묶음에서 그 코드의 사용 횟수를 1 올려야 함
       allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['name', 'inviteCode', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['name', 'inviteCode', 'createdAt', 'maxStudents'])
         && request.resource.data.name is string && request.resource.data.name.size() <= 40
+        && request.resource.data.get('maxStudents', 100) is int
+        && request.resource.data.get('maxStudents', 100) >= 1
+        && request.resource.data.get('maxStudents', 100) <= 100
         && get(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.active == true
         && get(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.usedCount
            < get(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.maxClasses
@@ -108,20 +140,40 @@ service cloud.firestore {
         allow delete: if isTeacher(cid);
       }
 
-      // 학생 명단 (번호·별명만): 학급 코드를 아는 사람은 볼 수 있음
+      // 학생 명단 (자리 번호·닉네임만): 학급 코드를 아는 사람은 볼 수 있음
       match /students/{sid} {
         allow read: if signedIn();
-        allow create, delete: if isTeacher(cid);
-        allow update: if isTeacher(cid)
+        allow delete: if isTeacher(cid);
+        // 학생이 스스로 등록: 같은 묶음에서 비밀번호와 기기 등록을 함께 만들어야 하고,
+        // 자리 번호는 1 ~ 학급 정원(maxStudents, 없으면 100) 안이어야 함
+        allow create: if isTeacher(cid)
           || (isStudentAfter(cid, sid)
-              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claimed'])
-              && request.resource.data.claimed == true);
+              && request.resource.data.keys().hasOnly(['number', 'nickname', 'claimed'])
+              && request.resource.data.claimed == true
+              && request.resource.data.number is int
+              && request.resource.data.number >= 1
+              && request.resource.data.number <= get(/databases/$(db)/documents/classes/$(cid)).data.get('maxStudents', 100)
+              && sid == 's' + string(request.resource.data.number)
+              && validNick(request.resource.data.nickname));
+        allow update: if isTeacher(cid)
+          // 비밀번호가 없는 자리(교사가 초기화했거나 예전 방식의 빈 자리)에 들어올 때
+          || (isStudentAfter(cid, sid)
+              && resource.data.claimed == false
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claimed', 'nickname'])
+              && request.resource.data.claimed == true
+              && validNick(request.resource.data.nickname))
+          // 본인이 닉네임 바꾸기: 30일에 한 번 (바꾼 때는 서버 시계로 기록)
+          || (isStudent(cid, sid)
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nickname', 'nickAt'])
+              && validNick(request.resource.data.nickname)
+              && request.resource.data.nickAt == request.time
+              && (!('nickAt' in resource.data) || request.time > resource.data.nickAt + duration.value(30, 'd')));
       }
       // 학생 비밀번호 해시: 아직 없을 때 한 번만 만들 수 있고, 교사만 지울(초기화) 수 있음
       match /pins/{sid} {
         allow read, update: if false;
         allow create: if signedIn()
-          && exists(/databases/$(db)/documents/classes/$(cid)/students/$(sid))
+          && existsAfter(/databases/$(db)/documents/classes/$(cid)/students/$(sid))
           && request.resource.data.keys().hasOnly(['pinHash']);
         allow delete: if isTeacher(cid);
       }
@@ -141,24 +193,25 @@ service cloud.firestore {
         allow get, create, update: if isTeacher(cid) || isMember(cid);
         allow delete: if isTeacher(cid);
       }
-      // 나눔 게시판(승인된 글 모음): 교사만 쓰고, 학급에 참여한 기기가 읽음
+      // 나눔 게시판 · 칭찬 게시판: 학급에 참여한 기기가 읽고, 자기 글 하나씩만 더할 수 있음. 내리기는 교사만
       match /public/board {
         allow get: if isTeacher(cid) || isMember(cid);
-        allow create, update, delete: if isTeacher(cid);
+        allow create: if isTeacher(cid) || boardCreate(cid);
+        allow update: if isTeacher(cid) || boardAdd(cid);
+        allow delete: if isTeacher(cid);
       }
-      // 받은 칭찬 쪽지함(승인된 쪽지): 교사만 쓰고, 받는 학생 본인만 읽음
+      match /public/praise {
+        allow get: if isTeacher(cid) || isMember(cid);
+        allow create: if isTeacher(cid) || boardCreate(cid);
+        allow update: if isTeacher(cid) || boardAdd(cid);
+        allow delete: if isTeacher(cid);
+      }
+      // (예전 방식) 승인 대기함과 쪽지함: 이제 쓰지 않음. 남아 있는 자료는 교사만 읽고 지울 수 있음
       match /inbox/{sid} {
-        allow get: if isTeacher(cid) || isStudent(cid, sid);
-        allow create, update, delete: if isTeacher(cid);
+        allow read, delete: if isTeacher(cid);
       }
-      // 학생이 쓴 쪽지·게시판 글(승인 대기함): 본인이 '대기' 상태로만 만들 수 있고, 본인 글과 교사만 읽음
       match /posts/{pid} {
-        allow read: if isTeacher(cid) || (isMember(cid) && resource.data.from == memberSid(cid));
-        allow create: if isMember(cid)
-          && request.resource.data.from == memberSid(cid)
-          && request.resource.data.status == 'pending'
-          && request.resource.data.text is string && request.resource.data.text.size() <= 300;
-        allow update, delete: if isTeacher(cid);
+        allow read, delete: if isTeacher(cid);
       }
       // 공감 스티커: 누른 본인, 그 글의 글쓴이, 교사만 읽음 (다른 학생은 개수를 알 수 없음)
       match /reactions/{rid} {

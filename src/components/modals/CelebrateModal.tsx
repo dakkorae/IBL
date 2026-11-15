@@ -10,7 +10,7 @@ export default function CelebrateModal() {
     setCurrentView,
     setShowCelebrateModal,
     showCelebrateModal,
-    userInfo
+    displayName
   } = usePortfolio();
 
   return (
@@ -45,7 +45,7 @@ export default function CelebrateModal() {
                   성장 완료! 하교 승인 완료
                 </span>
                 <h3 className="text-lg sm:text-xl font-black text-slate-800 pt-1">
-                  멋져요, {userInfo.name} 어린이!
+                  멋져요, {displayName} 어린이!
                 </h3>
                 <p className="text-xs text-indigo-600 font-bold">
                   오늘의 {selectedMissions.length}가지 학습자상을 성실하게 실천했습니다!

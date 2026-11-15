@@ -120,4 +120,5 @@ export function buildClassStats(students: Student[], portfolios: Record<string, 
 }
 
 export type ClassStats = ReturnType<typeof buildClassStats>;
-export const displayName = (s: Student) => (s.nickname && s.nickname !== `${s.number}번` ? `${s.number}번 ${s.nickname}` : `${s.number}번`);
+// 학생이 스스로 정한 닉네임으로 표시 (닉네임이 비어 있으면 자리 번호)
+export const displayName = (s: Student) => s.nickname || `${s.number}번`;

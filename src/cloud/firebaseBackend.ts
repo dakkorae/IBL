@@ -11,12 +11,13 @@ import {
   getFirestore,
   increment,
   query,
+  serverTimestamp,
   where,
   setDoc,
   updateDoc,
   writeBatch
 } from 'firebase/firestore';
-import { Entry, Post, Reaction, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, JoinResult, Student } from './types';
+import { BoardKind, Entry, Reaction, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, JoinResult, MAX_CLASS_STUDENTS, NICK_CHANGE_DAYS, RegisterResult, RenameResult, Student } from './types';
 import { adminKeyHash, chunk, clean, normalizeCode, pinHash, randomCode, teacherKeyHash } from './util';
 
 export interface FirebaseConfig {
@@ -59,8 +60,13 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
     id,
     number: Number(d.number) || 0,
     nickname: String(d.nickname || ''),
-    claimed: !!d.claimed
+    claimed: !!d.claimed,
+    ...(d.nickAt ? { nickAt: typeof (d.nickAt as { toMillis?: () => number }).toMillis === 'function' ? (d.nickAt as { toMillis: () => number }).toMillis() : Number(d.nickAt) } : {})
   });
+  // 게시판 문서: 칭찬 게시판은 public/praise, 나눔 게시판은 public/board (학생이 문서 하나만 읽으면 되도록 모아 둠)
+  const boardRef = (cid: string, kind: BoardKind) => subDoc(cid, 'public', kind === 'praise' ? 'praise' : 'board');
+  // 교사가 만들어 둔 빈 자리(예전 방식의 "3번")인지
+  const isPlaceholder = (s: Student) => !s.claimed && s.nickname === `${s.number}번`;
 
   const backend: CloudBackend = {
     kind: 'firebase',
@@ -100,7 +106,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
     },
 
     // ---------------- 교사 ----------------
-    async createClass({ inviteCode, name, studentCount, password }) {
+    async createClass({ inviteCode, name, maxStudents, password }) {
       const id = await uid();
       const code = inviteCode.trim().toUpperCase();
       const inviteRef = doc(db, 'inviteCodes', code);
@@ -113,7 +119,8 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       let classId = randomCode(6);
       while ((await getDoc(classRef(classId))).exists()) classId = randomCode(6);
       const keyHash = await teacherKeyHash(classId, password);
-      const info = { name: name.trim(), inviteCode: code, createdAt: Date.now() };
+      const max = Math.min(MAX_CLASS_STUDENTS, Math.max(1, Math.round(maxStudents) || MAX_CLASS_STUDENTS));
+      const info = { name: name.trim(), inviteCode: code, createdAt: Date.now(), maxStudents: max };
 
       // 학급 문서 + 교사 비밀번호 + 이 기기를 교사로 등록 + 개설 코드 사용 횟수 올리기를 한 번에 처리
       const batch = writeBatch(db);
@@ -128,13 +135,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
         throw e;
       }
 
-      const numbers = Array.from({ length: studentCount }, (_, i) => i + 1);
-      for (const part of chunk(numbers, 10)) {
-        const b = writeBatch(db);
-        part.forEach((n) => b.set(subDoc(classId, 'students', `s${n}`), { number: n, nickname: `${n}번`, claimed: false }));
-        await b.commit();
-      }
-      return { id: classId, name: info.name, createdAt: info.createdAt };
+      return { id: classId, name: info.name, createdAt: info.createdAt, maxStudents: max };
     },
 
     async teacherLogin(classId, password) {
@@ -154,13 +155,6 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
     async updateClassName(classId, name) {
       await uid();
       await updateDoc(classRef(classId), { name: name.trim() });
-    },
-    async addStudent(classId, number, nickname) {
-      await uid();
-      const sid = `s${number}`;
-      const data = { number, nickname: nickname.trim() || `${number}번`, claimed: false };
-      await setDoc(subDoc(classId, 'students', sid), data);
-      return { id: sid, ...data };
     },
     async updateStudentNickname(classId, sid, nickname) {
       await uid();
@@ -211,28 +205,10 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       await uid();
       await setDoc(subDoc(classId, 'feedback', sid), { items: { [date]: feedback ? clean(feedback) : deleteField() } }, { merge: true });
     },
-    async listPosts(classId) {
-      await uid();
-      return (await getDocs(sub(classId, 'posts'))).docs.map((d) => ({ id: d.id, ...d.data() }) as Post).sort((a, b) => b.createdAt - a.createdAt);
-    },
-    async reviewPost(classId, post, approve) {
+    async removeEntry(classId, kind, postId) {
       await uid();
       const batch = writeBatch(db);
-      batch.update(subDoc(classId, 'posts', post.id), { status: approve ? 'approved' : 'rejected', reviewedAt: Date.now() });
-      if (approve) {
-        // 승인된 글은 학생들이 한 번에 읽는 문서(게시판 / 받는 학생의 쪽지함)에 옮겨 적음
-        const { status, ...entry } = post;
-        void status;
-        if (post.type === 'share') batch.set(subDoc(classId, 'public', 'board'), { posts: { [post.id]: clean(entry) } }, { merge: true });
-        else if (post.to) batch.set(subDoc(classId, 'inbox', post.to), { notes: { [post.id]: clean(entry) } }, { merge: true });
-      }
-      await batch.commit();
-    },
-    async removeFromBoard(classId, postId) {
-      await uid();
-      const batch = writeBatch(db);
-      batch.set(subDoc(classId, 'public', 'board'), { posts: { [postId]: deleteField() } }, { merge: true });
-      batch.update(subDoc(classId, 'posts', postId), { status: 'removed' });
+      batch.set(boardRef(classId, kind), { posts: { [postId]: deleteField() } }, { merge: true });
       const reports = await getDocs(query(sub(classId, 'reports'), where('postId', '==', postId)));
       reports.docs.forEach((d) => batch.delete(d.ref));
       await batch.commit();
@@ -257,7 +233,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       ]);
       for (const name of ['posts', 'reactions', 'reports']) (await getDocs(sub(classId, name))).docs.forEach((d) => refs.push(d.ref));
       students.docs.forEach((d) => refs.push(subDoc(classId, 'inbox', d.id)));
-      refs.push(subDoc(classId, 'public', 'board'));
+      refs.push(subDoc(classId, 'public', 'board'), subDoc(classId, 'public', 'praise'));
       const members = await getDocs(sub(classId, 'members'));
       members.docs.forEach((d) => refs.push(d.ref));
       const teachers = await getDocs(sub(classId, 'teachers'));
@@ -279,7 +255,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       const snap = await getDoc(classRef(cid));
       if (!snap.exists()) return null;
       const d = snap.data();
-      return { id: cid, name: String(d.name || ''), createdAt: Number(d.createdAt) || 0, focus: d.focus || null, goal: d.goal || null, extraMissions: d.extraMissions || null } as ClassInfo;
+      return { id: cid, name: String(d.name || ''), createdAt: Number(d.createdAt) || 0, maxStudents: Number(d.maxStudents) || MAX_CLASS_STUDENTS, focus: d.focus || null, goal: d.goal || null, extraMissions: d.extraMissions || null } as ClassInfo;
     },
     async listStudents(classId) {
       await uid();
@@ -288,6 +264,63 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
     },
 
     // ---------------- 학생 ----------------
+    async registerStudent(classId, nickname, pin): Promise<RegisterResult> {
+      const id = await uid();
+      const nick = nickname.trim();
+      const cls = await getDoc(classRef(classId));
+      if (!cls.exists()) throw new CloudError('not-found', '학급을 찾을 수 없어요.');
+      const max = Math.min(MAX_CLASS_STUDENTS, Number(cls.data().maxStudents) || MAX_CLASS_STUDENTS);
+      // 다른 친구가 같은 순간에 같은 자리를 잡으면 서버가 거절하므로, 그때는 다음 빈 자리로 다시 시도
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const list = await backend.listStudents(classId);
+        if (list.some((s) => !isPlaceholder(s) && s.nickname === nick)) return { result: 'taken' };
+        const byNumber = new Map(list.map((s) => [s.number, s]));
+        let number = 0;
+        for (let n = 1; n <= max; n++) {
+          const cur = byNumber.get(n);
+          if (!cur || isPlaceholder(cur)) {
+            number = n;
+            break;
+          }
+        }
+        if (!number) return { result: 'full' };
+        const sid = `s${number}`;
+        const hash = await pinHash(classId, sid, pin);
+        const batch = writeBatch(db);
+        batch.set(subDoc(classId, 'pins', sid), { pinHash: hash });
+        batch.set(subDoc(classId, 'members', id), { sid, pinHash: hash });
+        if (byNumber.has(number)) batch.update(subDoc(classId, 'students', sid), { nickname: nick, claimed: true });
+        else batch.set(subDoc(classId, 'students', sid), { number, nickname: nick, claimed: true });
+        try {
+          await batch.commit();
+          return { result: 'ok', student: { id: sid, number, nickname: nick, claimed: true } };
+        } catch (e) {
+          if (!isDenied(e)) throw e;
+        }
+      }
+      throw new CloudError('unknown', '등록하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    },
+    async getStudent(classId, sid) {
+      await uid();
+      const snap = await getDoc(subDoc(classId, 'students', sid));
+      return snap.exists() ? toStudent(snap.id, snap.data()) : null;
+    },
+    async renameSelf(classId, sid, nickname): Promise<RenameResult> {
+      await uid();
+      const nick = nickname.trim();
+      const same = await getDocs(query(sub(classId, 'students'), where('nickname', '==', nick)));
+      if (same.docs.some((d) => d.id !== sid)) return 'taken';
+      const me = await backend.getStudent(classId, sid);
+      if (me?.nickAt && Date.now() - me.nickAt < NICK_CHANGE_DAYS * 86400000) return 'too-soon';
+      try {
+        // 바꾼 때는 서버 시계로 적음 (한 달에 한 번 제한은 보안 규칙이 검사)
+        await updateDoc(subDoc(classId, 'students', sid), { nickname: nick, nickAt: serverTimestamp() });
+        return 'ok';
+      } catch (e) {
+        if (isDenied(e)) return 'too-soon';
+        throw e;
+      }
+    },
     async joinClass(classId, sid, pin): Promise<JoinResult> {
       const id = await uid();
       const student = await getDoc(subDoc(classId, 'students', sid));
@@ -295,7 +328,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       const hash = await pinHash(classId, sid, pin);
       try {
         if (!student.data().claimed) {
-          // 처음 입장: 비밀번호를 정하고 이 기기를 그 번호의 주인으로 등록
+          // 비밀번호가 초기화된 뒤 다시 입장: 새 비밀번호를 정하고 이 기기를 등록
           const batch = writeBatch(db);
           batch.set(subDoc(classId, 'pins', sid), { pinHash: hash });
           batch.set(subDoc(classId, 'members', id), { sid, pinHash: hash });
@@ -383,27 +416,20 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       const snap = await getDoc(subDoc(classId, 'feedback', sid));
       return ((snap.data() || {}).items || {}) as FeedbackMap;
     },
-    async createPost(classId, post) {
+    async addEntry(classId, entry) {
       await uid();
-      const ref = doc(sub(classId, 'posts'));
-      const data = { ...clean(post), status: 'pending' as const, createdAt: Date.now() };
-      await setDoc(ref, data);
-      return { id: ref.id, ...data } as Post;
+      const id = doc(sub(classId, 'reports')).id; // 겹치지 않는 새 ID만 빌려 씀
+      const full = { ...clean(entry), id, createdAt: Date.now() } as Entry;
+      // last: 방금 넣은 글의 ID. 보안 규칙이 "자기 글 하나만 더했는지" 검사하는 데 씀
+      await setDoc(boardRef(classId, entry.type), { posts: { [id]: full }, last: id }, { merge: true });
+      return full;
     },
-    async listMyPosts(classId, sid) {
+    async getBoard(classId, kind) {
       await uid();
-      const snap = await getDocs(query(sub(classId, 'posts'), where('from', '==', sid)));
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Post).sort((a, b) => b.createdAt - a.createdAt);
-    },
-    async getBoard(classId) {
-      await uid();
-      const snap = await getDoc(subDoc(classId, 'public', 'board'));
-      return (Object.values((snap.data() || {}).posts || {}) as Entry[]).sort((a, b) => b.createdAt - a.createdAt);
-    },
-    async getInbox(classId, sid) {
-      await uid();
-      const snap = await getDoc(subDoc(classId, 'inbox', sid));
-      return (Object.values((snap.data() || {}).notes || {}) as Entry[]).sort((a, b) => b.createdAt - a.createdAt);
+      const snap = await getDoc(boardRef(classId, kind));
+      return (Object.values((snap.data() || {}).posts || {}) as Entry[])
+        .map((e) => ({ ...e, type: kind }))
+        .sort((a, b) => b.createdAt - a.createdAt);
     },
     async getMyReactions(classId, sid) {
       await uid();

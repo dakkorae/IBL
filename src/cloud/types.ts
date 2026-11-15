@@ -25,6 +25,7 @@ export interface ClassInfo {
   id: string; // 학급 코드
   name: string;
   createdAt: number;
+  maxStudents?: number; // 참여할 수 있는 학생 수 (없으면 100명)
   focus?: ClassFocus | null;
   goal?: ClassGoal | null;
   extraMissions?: Partial<Record<LearnerProfileKey, string[]>> | null; // 교사가 추가한 우리 반 미션
@@ -55,22 +56,18 @@ export interface Feedback {
 }
 export type FeedbackMap = Record<string, Feedback>; // 날짜 → 피드백
 
-// 칭찬 쪽지(note)와 나눔 게시판 글(share). 학생이 쓰면 '대기' 상태가 되고 교사가 승인해야 전달·게시됨
-export type PostStatus = 'pending' | 'approved' | 'rejected' | 'removed';
-export interface Post {
+// 칭찬 게시판(praise)과 나눔 게시판(share)의 글. 비속어 검사를 통과하면 바로 게시되고, 교사가 내릴 수 있음
+export type BoardKind = 'praise' | 'share';
+export interface Entry {
   id: string;
-  type: 'note' | 'share';
+  type: BoardKind;
   from: string; // 쓴 학생 sid
   fromName: string;
-  to?: string; // 쪽지를 받는 학생 sid
-  toName?: string;
+  toName?: string; // 칭찬 받는 사람 (학생이 직접 적은 이름이나 닉네임)
   profileKey: LearnerProfileKey | null;
   text: string;
-  status: PostStatus;
   createdAt: number;
 }
-// 승인되어 게시판·받은 쪽지함에 올라간 글
-export type Entry = Omit<Post, 'status'>;
 
 // 공감 스티커: 누가(sid) 어느 글(postId, 글쓴이 author)에 무엇(kind)을 눌렀는지
 export type ReactionKind = 'clap' | 'try' | 'thanks';
@@ -85,8 +82,13 @@ export interface Student {
   id: string;
   number: number;
   nickname: string;
-  claimed: boolean; // 학생이 비밀번호를 정하고 입장했는지
+  claimed: boolean; // 비밀번호가 정해져 있는지 (교사가 초기화하면 false)
+  nickAt?: number; // 학생이 닉네임을 마지막으로 바꾼 때 (한 달에 한 번만 바꿀 수 있음)
 }
+
+export const MAX_CLASS_STUDENTS = 100;
+export const NICKNAME_MAX = 12;
+export const NICK_CHANGE_DAYS = 30;
 
 export interface InviteCode {
   code: string;
@@ -107,6 +109,9 @@ export interface ClassSession {
 }
 
 export type JoinResult = 'ok' | 'wrong-pin' | 'not-found';
+// 새로 등록: taken = 이미 있는 닉네임, full = 학급 정원이 다 참
+export type RegisterResult = { result: 'ok'; student: Student } | { result: 'taken' | 'full' };
+export type RenameResult = 'ok' | 'taken' | 'too-soon';
 
 // 서버와 주고받는 모든 동작. 실제 서버(Firebase)와 체험용(이 브라우저 안에서만 동작) 두 가지 구현이 있음
 export interface CloudBackend {
@@ -120,19 +125,16 @@ export interface CloudBackend {
   setInviteActive(code: string, active: boolean): Promise<void>;
 
   // 교사
-  createClass(input: { inviteCode: string; name: string; studentCount: number; password: string }): Promise<ClassInfo>;
+  createClass(input: { inviteCode: string; name: string; maxStudents: number; password: string }): Promise<ClassInfo>;
   teacherLogin(classId: string, password: string): Promise<boolean>;
   isTeacher(classId: string): Promise<boolean>;
   updateClassName(classId: string, name: string): Promise<void>;
-  addStudent(classId: string, number: number, nickname: string): Promise<Student>;
   updateStudentNickname(classId: string, sid: string, nickname: string): Promise<void>;
   removeStudent(classId: string, sid: string): Promise<void>;
   resetPin(classId: string, sid: string): Promise<void>;
   listPortfolios(classId: string): Promise<Record<string, CloudRecord[]>>;
   updateClassActivity(classId: string, patch: Partial<Pick<ClassInfo, 'focus' | 'goal' | 'extraMissions'>>): Promise<void>;
-  listPosts(classId: string): Promise<Post[]>;
-  reviewPost(classId: string, post: Post, approve: boolean): Promise<void>;
-  removeFromBoard(classId: string, postId: string): Promise<void>;
+  removeEntry(classId: string, kind: BoardKind, postId: string): Promise<void>;
   listReports(classId: string): Promise<{ postId: string; sid: string }[]>;
   listReactions(classId: string): Promise<Reaction[]>;
   setClassStats(classId: string, stats: ClassPublicStats): Promise<void>;
@@ -145,17 +147,20 @@ export interface CloudBackend {
   listStudents(classId: string): Promise<Student[]>;
 
   // 학생
+  // 처음 등록: 학생이 닉네임과 비밀번호를 스스로 정함
+  registerStudent(classId: string, nickname: string, pin: string): Promise<RegisterResult>;
+  // 다시 들어오기(다른 기기, 나갔다가 다시): 닉네임으로 찾은 sid와 비밀번호로 입장
   joinClass(classId: string, sid: string, pin: string): Promise<JoinResult>;
+  getStudent(classId: string, sid: string): Promise<Student | null>;
+  renameSelf(classId: string, sid: string, nickname: string): Promise<RenameResult>;
   leaveClass(classId: string): Promise<void>;
   getPortfolio(classId: string, sid: string): Promise<CloudRecord[]>;
   saveRecords(classId: string, sid: string, records: CloudRecord[]): Promise<void>;
   getClassStats(classId: string): Promise<ClassPublicStats | null>;
   applyStatsDelta(classId: string, deltas: StatsDelta[]): Promise<void>;
   getFeedback(classId: string, sid: string): Promise<FeedbackMap>;
-  createPost(classId: string, post: Omit<Post, 'id' | 'status' | 'createdAt'>): Promise<Post>;
-  listMyPosts(classId: string, sid: string): Promise<Post[]>;
-  getBoard(classId: string): Promise<Entry[]>;
-  getInbox(classId: string, sid: string): Promise<Entry[]>;
+  addEntry(classId: string, entry: Omit<Entry, 'id' | 'createdAt'>): Promise<Entry>;
+  getBoard(classId: string, kind: BoardKind): Promise<Entry[]>;
   // mine: 내가 누른 스티커, toMe: 내 글이 받은 스티커
   getMyReactions(classId: string, sid: string): Promise<{ mine: Reaction[]; toMe: Reaction[] }>;
   setReaction(classId: string, reaction: Omit<Reaction, 'kind'> & { kind: ReactionKind | null }): Promise<void>;

@@ -13,7 +13,8 @@ export default function SettingsView() {
     handleSaveSettings,
     setUserInfo,
     userInfo,
-    setCurrentView
+    setCurrentView,
+    classSession
   } = usePortfolio();
 
   return (
@@ -34,11 +35,15 @@ export default function SettingsView() {
 
       <ThemeSettingsCard />
 
-      {/* Account Profile Setup Form */}
+      {/* 학적 정보: 학급에 참여하지 않았을 때만 사용 (참여 중에는 학급 닉네임을 씀) */}
+      {!classSession && (
       <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-5">
-        <div className="flex items-center space-x-3 pb-3 border-b border-slate-50">
-          <User className="text-indigo-500" size={18} />
-          <h3 className="text-sm font-bold text-slate-800">학적 정보 및 프로필 변경</h3>
+        <div className="pb-3 border-b border-slate-50">
+          <div className="flex items-center space-x-3">
+            <User className="text-indigo-500" size={18} />
+            <h3 className="text-sm font-bold text-slate-800">학적 정보 및 프로필 변경</h3>
+          </div>
+          <p className="text-xs text-slate-500 mt-1.5">🔒 여기에 적은 이름·학교 정보는 이 기기에만 저장되고, 서버로 보내지 않아요.</p>
         </div>
 
         <form onSubmit={handleSaveSettings} className="space-y-4">
@@ -100,6 +105,7 @@ export default function SettingsView() {
           </button>
         </form>
       </div>
+      )}
 
       {/* Data Management Card */}
       <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-5">
@@ -112,8 +118,8 @@ export default function SettingsView() {
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
             <h4 className="text-xs font-bold text-slate-700">로컬 브라우저 데이터 (LocalStorage)</h4>
             <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-              이 애플리케이션의 모든 활동 데이터(과거 실천 이력, 학적 세팅)는 사용자 브라우저의 내부 메모리(localStorage)에
-              안전하고 즉시 저장됩니다. 별도의 외부 서버 연동 없이 독립적으로 동작합니다.
+              실천 기록과 설정은 이 기기의 브라우저 저장 공간(localStorage)에 바로 저장됩니다.
+              학급에 참여하면 실천 기록과 닉네임만 학급 서버에도 저장되고, 이름·학교 같은 개인정보는 서버로 보내지 않습니다.
             </p>
           </div>
 

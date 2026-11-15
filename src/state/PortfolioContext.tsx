@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { LearnerProfileKey, DailyRecord, ViewType, TimePeriod, Reflection, BadgeStatus } from '../types';
-import { PROFILE_DATA, generateMockHistory, calculateStats, getLocalDateString, parseDateString, getMissionForDay, getDefaultMissionForDay, getRandomMission, reconstructHistoryFromShared } from '../data';
+import { PROFILE_DATA, generateMockHistory, calculateStats, getLocalDateString, parseDateString, getMissionForDay, getDefaultMissionForDay, getRandomMission } from '../data';
 import { evaluateBadges, CommunityCounts } from '../badges';
 import { getDailyDrafts, saveDailyDraft, clearDailyDraft } from '../storage/drafts';
 import { getBackend, loadClassSession, saveClassSession } from '../cloud';
-import { ClassInfo, ClassPublicStats, ClassSession, CloudRecord, FeedbackMap } from '../cloud/types';
+import { ClassInfo, ClassPublicStats, ClassSession, CloudRecord, FeedbackMap, RenameResult, Student } from '../cloud/types';
+import { badWordMessage } from '../filter';
 import { recordDelta } from '../cloud/stats';
 
 export const MIN_REFLECTION_LENGTH = 5;
@@ -180,15 +181,6 @@ function usePortfolioState() {
   const [calendarViewYear, setCalendarViewYear] = useState<number>(() => new Date().getFullYear());
   const [calendarViewMonth, setCalendarViewMonth] = useState<number>(() => new Date().getMonth());
 
-  // Sharing Mode States
-  const [isShareMode, setIsShareMode] = useState(false);
-  const [sharedUserInfo, setSharedUserInfo] = useState({
-    name: '김현우',
-    grade: '5',
-    classroom: '3',
-    school: 'IB World School'
-  });
-
   // Badge Unlock States
   const [newlyUnlockedBadges, setNewlyUnlockedBadges] = useState<BadgeStatus[]>([]);
   const [showBadgeUnlockModal, setShowBadgeUnlockModal] = useState(false);
@@ -265,7 +257,7 @@ function usePortfolioState() {
     }
   }, [selectedDate, isCalendarOpen]);
 
-  // 학급 활동 횟수(승인된 쪽지·게시 글 수, 공동 목표 달성 참여): '우리 반 배지' 판정에 씀. 기기에 기억해 둠
+  // 학급 활동 횟수(칭찬·나눔 게시판에 올린 글 수, 공동 목표 달성 참여): '우리 반 배지' 판정에 씀. 기기에 기억해 둠
   const [classSession, setClassSession] = useState<ClassSession | null>(loadClassSession);
   const [community, setCommunity] = useState<CommunityCounts>(() => {
     try {
@@ -284,7 +276,7 @@ function usePortfolioState() {
 
   // 교사가 추가한 '우리 반 미션'을 오늘의 미션으로 고르기 (미션 바꾸기 횟수는 쓰지 않음)
   const handleSetClassMission = (profileKey: LearnerProfileKey, mission: string) => {
-    if (isShareMode || (submittedToday && !isEditingToday)) return;
+    if ((submittedToday && !isEditingToday)) return;
     const next = { ...customMissionsByDate, [selectedDate]: { ...(customMissionsByDate[selectedDate] || {}), [profileKey]: mission } };
     setCustomMissionsByDate(next);
     localStorage.setItem('ib_custom_missions_by_date', JSON.stringify(next));
@@ -361,31 +353,6 @@ function usePortfolioState() {
     }
   }, [userInfo]);
 
-  // --- INITIALIZATION FOR URL SHARE MODE ---
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const shareParam = urlParams.get('share');
-
-    if (shareParam) {
-      try {
-        const decoded = decodeURIComponent(atob(shareParam));
-        const parsed = JSON.parse(decoded);
-        if (parsed.u && parsed.stats) {
-          setIsShareMode(true);
-          setSharedUserInfo(parsed.u);
-          setUserInfo(parsed.u);
-
-          const dummyHistory = reconstructHistoryFromShared(parsed.stats);
-          setHistory(dummyHistory);
-          setSubmittedToday(true);
-        }
-      } catch (e) {
-        console.error('공유 데이터를 해석하는데 실패했습니다.', e);
-        alert('❌ 올바르지 않거나 손상된 공유 링크입니다. 일반 모드로 접속합니다.');
-      }
-    }
-  }, []);
-
   // Listen for date or history changes, to sync checklist input states with the selected date's record or saved draft
   useEffect(() => {
     const record = history.find((r) => r.date === selectedDate);
@@ -421,7 +388,6 @@ function usePortfolioState() {
   // Reroll single profile mission for the selected date (max 3 times per profile per day)
   const handleRerollMission = (profileKey: LearnerProfileKey, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isShareMode) return;
     if (submittedToday && !isEditingToday) {
       showToast('⚠️ 이미 제출된 기록에서는 미션을 변경할 수 없습니다. 수정을 원하시면 "기록 수정하기"를 눌러주세요.', 'warning');
       return;
@@ -471,7 +437,6 @@ function usePortfolioState() {
 
   // Toggle mission selection with immediate draft persistence
   const handleToggleMission = (key: LearnerProfileKey) => {
-    if (isShareMode) return; // Prevent modification in share mode
     if (submittedToday && !isEditingToday) return; // Prevent modification if submitted & not editing
 
     const updated = selectedMissions.includes(key)
@@ -487,7 +452,7 @@ function usePortfolioState() {
   };
 
   // --- 실천 기록(한 줄 기록) 입력 ---
-  const canEditReflections = !isShareMode && !(submittedToday && !isEditingToday);
+  const canEditReflections = !(submittedToday && !isEditingToday);
 
   const updateReflections = (next: Reflection[]) => {
     setReflections(next);
@@ -525,13 +490,12 @@ function usePortfolioState() {
       if (!isReflectionOnlyMode && !r.profileKey) return '어떤 미션에 대한 기록인지 골라 주세요.';
       if (countChars(r.text) < MIN_REFLECTION_LENGTH) return `실천 기록은 ${MIN_REFLECTION_LENGTH}글자 이상 써 주세요.`;
     }
-    return null;
+    return badWordMessage(...filledReflections.map((r) => r.text));
   })();
 
   // Submit daily checklist
   const handleSubmitDaily = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isShareMode) return;
 
     if (reflectionError) {
       showToast(`⚠️ ${reflectionError}`, 'warning');
@@ -579,14 +543,13 @@ function usePortfolioState() {
 
   // Enable editing today's submitted data
   const handleEnableEdit = () => {
-    if (isShareMode) return;
     setIsEditingToday(true);
     saveDailyDraft(selectedDate, selectedMissions, reflections);
   };
 
   // Reset entire application data
   const handleResetData = () => {
-    if (isShareMode || blockedWhileInClass()) return;
+    if (blockedWhileInClass()) return;
     if (confirm('정말로 모든 포트폴리오 데이터를 초기화하시겠습니까?\n초기화 후에는 모든 실천 기록이 지워지고 처음부터 기록을 시작하게 됩니다.')) {
       const emptyHistory: DailyRecord[] = [];
       localStorage.setItem('ib_portfolio_history', JSON.stringify(emptyHistory));
@@ -607,7 +570,7 @@ function usePortfolioState() {
 
   // Load 365-day sample demo data for preview
   const handleLoadSampleData = () => {
-    if (isShareMode || blockedWhileInClass()) return;
+    if (blockedWhileInClass()) return;
     if (confirm('365일치 샘플 실천 데이터를 불러오시겠습니까?\n현재 저장된 실천 기록이 샘플 데이터로 대체됩니다.')) {
       const sample = generateMockHistory();
       localStorage.setItem('ib_portfolio_history', JSON.stringify(sample));
@@ -621,46 +584,10 @@ function usePortfolioState() {
   // Save profile settings
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isShareMode) return;
+    const bad = badWordMessage(userInfo.name, userInfo.classroom, userInfo.school);
+    if (bad) return showToast(`⚠️ ${bad}`, 'warning');
     localStorage.setItem('ib_user_info', JSON.stringify(userInfo));
-    alert('학적 정보가 저장되었습니다!');
-  };
-
-  // Share portfolio via Base64 encoded URL
-  const handleSharePortfolio = () => {
-    // Calculate cumulative stats for each profile key
-    const profileTotals: Record<string, number> = {};
-    PROFILE_DATA.forEach((p) => {
-      profileTotals[p.key] = 0;
-    });
-    
-    history.forEach((record) => {
-      record.completed.forEach((key) => {
-        if (profileTotals[key] !== undefined) {
-          profileTotals[key] += 1;
-        }
-      });
-    });
-
-    const payload = {
-      u: userInfo,
-      stats: profileTotals
-    };
-
-    try {
-      const jsonStr = JSON.stringify(payload);
-      // UTF-8 safe base64 encoding
-      const base64Str = btoa(encodeURIComponent(jsonStr));
-      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${base64Str}`;
-      
-      navigator.clipboard.writeText(shareUrl).then(() => {
-        alert('🎉 성장 포트폴리오를 친구들과 선생님, 부모님께 공유할 수 있는 링크가 복사되었습니다!\n원하는 곳에 붙여넣기(Ctrl+V) 하여 자랑해 보세요.');
-      }).catch(() => {
-        prompt('링크 복사에 실패했습니다. 아래 링크를 수동으로 복사해주세요:', shareUrl);
-      });
-    } catch (e) {
-      alert('공유 링크 생성에 실패했습니다.');
-    }
+    showToast('✅ 학적 정보를 이 기기에 저장했어요.', 'success');
   };
 
   // Export portfolio history as JSON file download
@@ -686,11 +613,6 @@ function usePortfolioState() {
       e.target.value = '';
       return;
     }
-    if (isShareMode) {
-      alert('공유 모드에서는 데이터를 가져올 수 없습니다.');
-      return;
-    }
-
     const fileReader = new FileReader();
     if (e.target.files && e.target.files[0]) {
       fileReader.readAsText(e.target.files[0], "UTF-8");
@@ -765,10 +687,11 @@ function usePortfolioState() {
   };
 
   // 우리 반 정보: 학급 설정(중점 학습자상·공동 목표), 학급 합계, 선생님 피드백
-  const [classData, setClassData] = useState<{ info: ClassInfo | null; stats: ClassPublicStats | null; feedback: FeedbackMap }>({
+  const [classData, setClassData] = useState<{ info: ClassInfo | null; stats: ClassPublicStats | null; feedback: FeedbackMap; me: Student | null }>({
     info: null,
     stats: null,
-    feedback: {}
+    feedback: {},
+    me: null
   });
   const [classDataState, setClassDataState] = useState<'idle' | 'loading' | 'error'>('idle');
 
@@ -777,12 +700,20 @@ function usePortfolioState() {
     setClassDataState('loading');
     try {
       const backend = await getBackend();
-      const [info, stats, feedback] = await Promise.all([
+      const [info, stats, feedback, me] = await Promise.all([
         backend.getClass(session.classId),
         backend.getClassStats(session.classId),
-        backend.getFeedback(session.classId, session.sid)
+        backend.getFeedback(session.classId, session.sid),
+        backend.getStudent(session.classId, session.sid)
       ]);
-      setClassData({ info, stats, feedback });
+      setClassData({ info, stats, feedback, me });
+      // 선생님이 닉네임이나 학급 이름을 바꿨으면 이 기기에도 반영
+      const className = info?.name || session.className;
+      if (me && (me.nickname !== session.nickname || className !== session.className)) {
+        const next = { ...session, nickname: me.nickname, className };
+        saveClassSession(next);
+        setClassSession((cur) => (cur && cur.classId === session.classId && cur.sid === session.sid ? next : cur));
+      }
       setClassDataState('idle');
       if (notify) {
         // 지난번 이후 새로 달린 선생님 피드백이 있으면 알려 줌
@@ -890,16 +821,26 @@ function usePortfolioState() {
     saveClassSession(session);
     setClassSession(session);
     loadClassData(session);
-    const nextUser = { ...userInfo, name: session.nickname, school: session.className };
-    setUserInfo(nextUser);
-    localStorage.setItem('ib_user_info', JSON.stringify(nextUser));
+  };
+
+  // 내 닉네임 바꾸기 (30일에 한 번, 서버 규칙이 검사)
+  const renameSelf = async (nickname: string): Promise<RenameResult> => {
+    if (!classSession) return 'ok';
+    const result = await (await getBackend()).renameSelf(classSession.classId, classSession.sid, nickname);
+    if (result === 'ok') {
+      const next = { ...classSession, nickname: nickname.trim() };
+      saveClassSession(next);
+      setClassSession(next);
+      setClassData((d) => ({ ...d, me: d.me ? { ...d.me, nickname: next.nickname, nickAt: Date.now() } : d.me }));
+    }
+    return result;
   };
 
   const disconnectClass = async () => {
     const session = classSession;
     saveClassSession(null);
     setClassSession(null);
-    setClassData({ info: null, stats: null, feedback: {} });
+    setClassData({ info: null, stats: null, feedback: {}, me: null });
     localStorage.removeItem(PENDING_KEY);
     setSyncState('idle');
     if (session) {
@@ -913,7 +854,7 @@ function usePortfolioState() {
 
   // 앱을 열 때: 못 올린 기록을 먼저 올리고, 서버 기록(다른 기기에서 쓴 것 포함)을 가져옴
   useEffect(() => {
-    if (!classSession || isShareMode) return;
+    if (!classSession) return;
     let cancelled = false;
     (async () => {
       try {
@@ -954,6 +895,8 @@ function usePortfolioState() {
     updateCommunity,
     classSession,
     connectClass,
+    renameSelf,
+    displayName: classSession ? classSession.nickname : userInfo.name,
     refreshClassData: () => loadClassData(),
     disconnectClass,
     syncState,
@@ -973,13 +916,11 @@ function usePortfolioState() {
     handleRerollMission,
     handleResetData,
     handleSaveSettings,
-    handleSharePortfolio,
     handleSubmitDaily,
     handleToggleMission,
     history,
     isCalendarOpen,
     isEditingToday,
-    isShareMode,
     reflections,
     newlyUnlockedBadges,
     recentlyRerolledKey,
@@ -994,14 +935,12 @@ function usePortfolioState() {
     setHistory,
     setIsCalendarOpen,
     setIsEditingToday,
-    setIsShareMode,
     setReflections,
     setNewlyUnlockedBadges,
     setRecentlyRerolledKey,
     setRerollCountsByDate,
     setSelectedDate,
     setSelectedMissions,
-    setSharedUserInfo,
     setShowBadgeUnlockModal,
     setShowCelebrateModal,
     setStatsPeriod,
@@ -1009,7 +948,6 @@ function usePortfolioState() {
     setToastMessage,
     setTodayStr,
     setUserInfo,
-    sharedUserInfo,
     showBadgeUnlockModal,
     showCelebrateModal,
     showToast,

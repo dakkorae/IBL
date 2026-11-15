@@ -1,4 +1,4 @@
-import { Entry, Post, Reaction, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, Student } from './types';
+import { BoardKind, Entry, Reaction, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, MAX_CLASS_STUDENTS, NICK_CHANGE_DAYS, Student } from './types';
 import { emptyStats } from './stats';
 import { adminKeyHash, normalizeCode, pinHash, randomCode, teacherKeyHash } from './util';
 
@@ -13,7 +13,7 @@ interface DemoClass {
   portfolios: Record<string, Record<string, CloudRecord>>;
   stats?: ClassPublicStats;
   feedback?: Record<string, FeedbackMap>;
-  posts?: Record<string, Post>;
+  boards?: Partial<Record<BoardKind, Record<string, Entry>>>;
   reactions?: Record<string, Reaction>;
   reports?: { postId: string; sid: string }[];
 }
@@ -100,7 +100,7 @@ export function createDemoBackend(): CloudBackend {
       save(s);
     },
 
-    async createClass({ inviteCode, name, studentCount, password }) {
+    async createClass({ inviteCode, name, maxStudents, password }) {
       await wait();
       const s = load();
       const inv = s.invites[inviteCode.trim().toUpperCase()];
@@ -109,8 +109,7 @@ export function createDemoBackend(): CloudBackend {
       }
       const id = randomCode(6);
       const students: Record<string, Student> = {};
-      for (let n = 1; n <= studentCount; n++) students[`s${n}`] = { id: `s${n}`, number: n, nickname: `${n}번`, claimed: false };
-      const info = { id, name: name.trim(), createdAt: Date.now() };
+      const info = { id, name: name.trim(), createdAt: Date.now(), maxStudents: Math.min(MAX_CLASS_STUDENTS, Math.max(1, Math.round(maxStudents) || MAX_CLASS_STUDENTS)) };
       s.classes[id] = { info, teacherHash: await teacherKeyHash(id, password), students, pins: {}, portfolios: {} };
       s.teacherOf.push(id);
       inv.usedCount += 1;
@@ -134,14 +133,6 @@ export function createDemoBackend(): CloudBackend {
       const s = load();
       needTeacher(s, classId).info.name = name.trim();
       save(s);
-    },
-    async addStudent(classId, number, nickname) {
-      const s = load();
-      const c = needTeacher(s, classId);
-      const st = { id: `s${number}`, number, nickname: nickname.trim() || `${number}번`, claimed: false };
-      c.students[st.id] = st;
-      save(s);
-      return st;
     },
     async updateStudentNickname(classId, sid, nickname) {
       const s = load();
@@ -197,19 +188,10 @@ export function createDemoBackend(): CloudBackend {
       else delete c.feedback[sid][date];
       save(s);
     },
-    async listPosts(classId) {
-      return Object.values(needTeacher(load(), classId).posts || {}).sort((a, b) => b.createdAt - a.createdAt);
-    },
-    async reviewPost(classId, post, approve) {
+    async removeEntry(classId, kind, postId) {
       const s = load();
       const c = needTeacher(s, classId);
-      if (c.posts?.[post.id]) c.posts[post.id].status = approve ? 'approved' : 'rejected';
-      save(s);
-    },
-    async removeFromBoard(classId, postId) {
-      const s = load();
-      const c = needTeacher(s, classId);
-      if (c.posts?.[postId]) c.posts[postId].status = 'removed';
+      if (c.boards?.[kind]) delete c.boards[kind]![postId];
       c.reports = (c.reports || []).filter((r) => r.postId !== postId);
       save(s);
     },
@@ -238,6 +220,40 @@ export function createDemoBackend(): CloudBackend {
       return Object.values(c.students).sort((a, b) => a.number - b.number);
     },
 
+    async registerStudent(classId, nickname, pin) {
+      await wait();
+      const s = load();
+      const c = need(s, classId);
+      const nick = nickname.trim();
+      const list = Object.values(c.students);
+      if (list.some((st) => st.nickname === nick)) return { result: 'taken' };
+      const max = c.info.maxStudents || MAX_CLASS_STUDENTS;
+      let number = 0;
+      for (let n = 1; n <= max && !number; n++) if (!c.students[`s${n}`]) number = n;
+      if (!number) return { result: 'full' };
+      const student: Student = { id: `s${number}`, number, nickname: nick, claimed: true };
+      c.students[student.id] = student;
+      c.pins[student.id] = await pinHash(classId, student.id, pin);
+      s.memberOf[classId] = student.id;
+      save(s);
+      return { result: 'ok', student };
+    },
+    async getStudent(classId, sid) {
+      return need(load(), classId).students[sid] || null;
+    },
+    async renameSelf(classId, sid, nickname) {
+      const s = load();
+      const c = need(s, classId);
+      const me = c.students[sid];
+      if (!me || s.memberOf[classId] !== sid) throw new CloudError('permission', '권한이 없어요.');
+      const nick = nickname.trim();
+      if (Object.values(c.students).some((st) => st.id !== sid && st.nickname === nick)) return 'taken';
+      if (me.nickAt && Date.now() - me.nickAt < NICK_CHANGE_DAYS * 86400000) return 'too-soon';
+      me.nickname = nick;
+      me.nickAt = Date.now();
+      save(s);
+      return 'ok';
+    },
     async joinClass(classId, sid, pin) {
       await wait();
       const s = load();
@@ -301,25 +317,20 @@ export function createDemoBackend(): CloudBackend {
       if (s.memberOf[classId] !== sid && !s.teacherOf.includes(classId)) throw new CloudError('permission', '권한이 없어요.');
       return need(s, classId).feedback?.[sid] || {};
     },
-    async createPost(classId, post) {
+    async addEntry(classId, entry) {
       await wait();
       const s = load();
       const c = need(s, classId);
-      if (s.memberOf[classId] !== post.from) throw new CloudError('permission', '권한이 없어요.');
-      const full: Post = { ...post, id: randomCode(10), status: 'pending', createdAt: Date.now() };
-      c.posts = { ...(c.posts || {}), [full.id]: full };
+      if (s.memberOf[classId] !== entry.from) throw new CloudError('permission', '권한이 없어요.');
+      const full: Entry = { ...entry, id: randomCode(10), createdAt: Date.now() };
+      c.boards = c.boards || {};
+      c.boards[entry.type] = { ...(c.boards[entry.type] || {}), [full.id]: full };
       save(s);
       return full;
     },
-    async listMyPosts(classId, sid) {
-      return Object.values(need(load(), classId).posts || {}).filter((p) => p.from === sid).sort((a, b) => b.createdAt - a.createdAt);
-    },
-    async getBoard(classId) {
+    async getBoard(classId, kind) {
       await wait();
-      return Object.values(need(load(), classId).posts || {}).filter((p) => p.type === 'share' && p.status === 'approved').sort((a, b) => b.createdAt - a.createdAt) as Entry[];
-    },
-    async getInbox(classId, sid) {
-      return Object.values(need(load(), classId).posts || {}).filter((p) => p.type === 'note' && p.to === sid && p.status === 'approved').sort((a, b) => b.createdAt - a.createdAt) as Entry[];
+      return Object.values(need(load(), classId).boards?.[kind] || {}).sort((a, b) => b.createdAt - a.createdAt);
     },
     async getMyReactions(classId, sid) {
       const all = Object.values(need(load(), classId).reactions || {});
