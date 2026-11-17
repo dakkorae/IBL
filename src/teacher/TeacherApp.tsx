@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { GraduationCap, Plus, KeyRound, Loader2, ChevronRight, ArrowLeft, FlaskConical } from 'lucide-react';
+import { LogOut, GraduationCap, Plus, KeyRound, Loader2, ChevronRight, ArrowLeft, FlaskConical } from 'lucide-react';
 import { cloudMode, errorMessage, getBackend, loadTeacherClasses, saveTeacherClasses } from '../cloud';
 import { normalizeCode } from '../cloud/util';
 import { MAX_CLASS_STUDENTS } from '../cloud/types';
@@ -79,6 +79,18 @@ export default function TeacherApp() {
     });
   };
 
+  // 로그아웃: 이 기기의 교사 등록을 지우고 '내 학급' 목록을 비움. 학급과 학생 기록은 그대로 남음
+  const logout = () => {
+    if (!window.confirm('이 기기에서 로그아웃할까요?\n학급과 학생 기록은 그대로 남아요. 다시 열 때는 학급 코드와 교사 비밀번호가 필요해요.')) return;
+    run(async () => {
+      await (await getBackend()).teacherLogout(classes.map((c) => c.id));
+      setClasses([]);
+      saveTeacherClasses([]);
+      setOpenId(null);
+      setMode('home');
+    });
+  };
+
   const shell = (children: React.ReactNode, wide = false) => (
     <div className="min-h-dvh bg-slate-100 font-sans text-slate-800">
       <header className="bg-slate-900 text-white">
@@ -92,7 +104,14 @@ export default function TeacherApp() {
               </span>
             )}
           </div>
-          <a href="#" className="shrink-0 text-xs font-bold text-slate-300 hover:text-white">학생 화면으로</a>
+          <div className="flex items-center gap-3 shrink-0">
+            <a href="#" className={`${classes.length > 0 ? 'hidden sm:inline' : ''} text-xs font-bold text-slate-300 hover:text-white whitespace-nowrap`}>학생 화면으로</a>
+            {cloudMode !== 'off' && classes.length > 0 && (
+              <button type="button" onClick={logout} disabled={busy} className="h-9 px-3 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-50">
+                <LogOut size={14} /> 로그아웃
+              </button>
+            )}
+          </div>
         </div>
       </header>
       <main className={`${wide ? 'max-w-6xl' : 'max-w-3xl'} mx-auto p-3 sm:p-6 space-y-4`}>{children}</main>

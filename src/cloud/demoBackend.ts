@@ -79,6 +79,11 @@ export function createDemoBackend(): CloudBackend {
       }
       return ok;
     },
+    async adminLogout() {
+      const s = load();
+      s.admin = false;
+      save(s);
+    },
     async isAdmin() {
       return load().admin;
     },
@@ -137,6 +142,11 @@ export function createDemoBackend(): CloudBackend {
       if (!s.teacherOf.includes(classId)) s.teacherOf.push(classId);
       save(s);
       return true;
+    },
+    async teacherLogout(classIds) {
+      const s = load();
+      s.teacherOf = s.teacherOf.filter((id) => !classIds.includes(id));
+      save(s);
     },
     async isTeacher(classId) {
       const s = load();

@@ -103,6 +103,10 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
         throw e;
       }
     },
+    async adminLogout() {
+      const id = await uid();
+      await deleteDoc(doc(db, 'admins', id));
+    },
     async isAdmin() {
       const id = await uid();
       return (await getDoc(doc(db, 'admins', id))).exists();
@@ -176,6 +180,11 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
         if (isDenied(e)) return false;
         throw e;
       }
+    },
+    async teacherLogout(classIds) {
+      const id = await uid();
+      // 이미 지워진 학급 등으로 실패해도 나머지는 계속 지움
+      await Promise.all(classIds.map((cid) => deleteDoc(subDoc(cid, 'teachers', id)).catch((e) => console.error('교사 등록 지우기 실패', cid, e))));
     },
     async isTeacher(classId) {
       const id = await uid();

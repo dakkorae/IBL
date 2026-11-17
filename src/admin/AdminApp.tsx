@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldCheck, Loader2, Copy, Check, FlaskConical, Trash2 } from 'lucide-react';
+import { LogOut, ShieldCheck, Loader2, Copy, Check, FlaskConical, Trash2 } from 'lucide-react';
 import { cloudMode, errorMessage, getBackend } from '../cloud';
 import { InviteCode } from '../cloud/types';
 import { adminKeyHash } from '../cloud/util';
@@ -55,12 +55,19 @@ export default function AdminApp() {
     <div className="min-h-dvh bg-slate-100 font-sans text-slate-800">
       <header className="bg-slate-900 text-white">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <span className="bg-indigo-600 p-1.5 rounded-lg"><ShieldCheck size={18} /></span>
-            <span className="font-extrabold text-sm sm:text-base">IB 학습자상 · 관리자</span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="bg-indigo-600 p-1.5 rounded-lg shrink-0"><ShieldCheck size={18} /></span>
+            <span className="font-extrabold text-sm sm:text-base truncate">IB 학습자상 · 관리자</span>
             {cloudMode === 'demo' && <span className="text-[10px] font-bold bg-amber-400 text-amber-950 px-2 py-0.5 rounded-full inline-flex items-center gap-1"><FlaskConical size={11} /> 체험용</span>}
           </div>
-          <a href="#teacher" className="text-xs font-bold text-slate-300 hover:text-white">교사용 페이지</a>
+          <div className="flex items-center gap-3 shrink-0">
+            <a href="#teacher" className={`${admin ? 'hidden sm:inline' : ''} text-xs font-bold text-slate-300 hover:text-white whitespace-nowrap`}>교사용 페이지</a>
+            {admin && (
+              <button type="button" disabled={busy} onClick={() => { if (window.confirm('이 기기에서 관리자 로그아웃할까요? 다시 들어올 때는 관리자 키가 필요해요.')) run(async (b) => { await b.adminLogout(); setAdmin(false); setCodes([]); setConfirmDelete(''); setNotice(''); }); }} className="h-9 px-3 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-50">
+                <LogOut size={14} /> 로그아웃
+              </button>
+            )}
+          </div>
         </div>
       </header>
 

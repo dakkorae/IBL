@@ -136,6 +136,7 @@ export interface CloudBackend {
   // 관리자 (개설 코드 발급)
   adminLogin(key: string): Promise<boolean>;
   isAdmin(): Promise<boolean>;
+  adminLogout(): Promise<void>; // 이 기기의 관리자 등록을 지움
   listInviteCodes(): Promise<InviteCode[]>;
   createInviteCode(maxClasses: number, memo: string): Promise<InviteCode>;
   setInviteActive(code: string, active: boolean): Promise<void>;
@@ -146,6 +147,7 @@ export interface CloudBackend {
   createClass(input: { inviteCode: string; name: string; maxStudents: number; password: string }): Promise<ClassInfo>;
   teacherLogin(classId: string, password: string): Promise<boolean>;
   isTeacher(classId: string): Promise<boolean>;
+  teacherLogout(classIds: string[]): Promise<void>; // 이 기기의 교사 등록을 지움 (학급과 기록은 그대로)
   updateClassName(classId: string, name: string): Promise<void>;
   updateStudentNickname(classId: string, sid: string, nickname: string): Promise<void>;
   removeStudent(classId: string, sid: string): Promise<void>;

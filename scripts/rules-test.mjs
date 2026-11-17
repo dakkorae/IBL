@@ -128,10 +128,20 @@ await ok('맞는 비밀번호로 s2 다른 기기 입장', setDoc(c(X, 'members/
 await ok('교사 학생 삭제', (() => { const b = writeBatch(T); ['portfolios', 'feedback', 'pins', 'students'].forEach((n) => b.delete(c(T, n + '/s2'))); return b.commit(); })());
 await ok('빈 자리 s2에 새 학생 등록', reg(B, 'devB', 2, '새친구', 'PB2'));
 
+// 8-2. 교사 로그아웃
+await no('다른 기기가 교사 등록 지우기', deleteDoc(c(X, 'teachers/teacher')));
+await ok('교사 로그아웃(자기 등록 지우기)', deleteDoc(c(T, 'teachers/teacher')));
+await no('로그아웃 뒤 학생 기록 읽기', getDoc(c(T, 'portfolios/s2')));
+await ok('교사 다시 로그인', setDoc(c(T, 'teachers/teacher'), { keyHash: 'TK' }));
+await ok('다시 로그인 뒤 학생 기록 읽기', getDoc(c(T, 'portfolios/s2')));
+
 // 9. 관리자
 await no('틀린 관리자 키', setDoc(doc(X, 'admins/outsider'), { keyHash: 'NOPE' }));
 await ok('관리자 로그인', setDoc(doc(AD, 'admins/admin'), { keyHash: 'ADMIN' }));
 await ok('관리자 코드 삭제', deleteDoc(doc(AD, 'inviteCodes/OLD')));
+await ok('관리자 로그아웃(자기 등록 지우기)', deleteDoc(doc(AD, 'admins/admin')));
+await no('로그아웃 뒤 코드 목록', getDocs(collection(AD, 'inviteCodes')));
+await ok('관리자 다시 로그인', setDoc(doc(AD, 'admins/admin'), { keyHash: 'ADMIN' }));
 // 관리자가 코드를 지우면서 그 코드로 만든 학급을 통째로 지움
 await no('관리자가 학생 기록 읽기', getDoc(c(AD, 'portfolios/s1')));
 await no('관리자가 게시판 읽기', getDoc(c(AD, 'public/praise')));
