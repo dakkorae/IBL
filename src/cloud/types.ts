@@ -80,6 +80,7 @@ export interface Entry {
   toName?: string; // 칭찬 받는 사람 (학생이 직접 적은 이름이나 닉네임)
   profileKey: LearnerProfileKey | null;
   mission?: string; // 나눔 글: 그날 실천한 미션 문장
+  src?: string; // 나눔 글: 어느 실천 기록에서 왔는지 ('날짜#번호'). 같은 기록을 두 번 올리지 않게 씀
   text: string;
   createdAt: number;
   likes?: string[]; // 좋아요를 누른 학생 sid 목록 (개수는 모두에게 보임)

@@ -113,6 +113,11 @@ export default function Community({ mode }: { mode: BoardKind }) {
     });
   };
 
+  // 이 기록을 이미 올렸는지: 새 글은 src 로, 예전 글(src 없음)은 학습자상·내용이 같은지로 판단
+  const myShares = boards.share.filter((e) => e.from === me);
+  const sharedAlready = (l: { id: string; profileKey: LearnerProfileKey | null; text: string }) =>
+    myShares.some((e) => (e.src ? e.src === l.id : e.profileKey === l.profileKey && e.text === l.text.slice(0, 300)));
+
   // 게시판에 나눌 수 있는 내 실천 기록 (최근 것부터, 5개씩 쪽을 나눠 보여 줌)
   const myLines = history
     .filter((r) => r.submitted)
@@ -123,6 +128,8 @@ export default function Community({ mode }: { mode: BoardKind }) {
         // 그날 그 학습자상으로 실천한 미션 문장을 함께 찾아 둠
         .map((x, i) => ({ id: `${r.date}#${i}`, date: r.date, ...x, mission: getMissionForDay(x.profileKey!, r.date, customMissionsByDate[r.date] as Record<string, string> | undefined) }))
     )
+    // 이미 나눔 게시판에 올린 기록은 빼고 보여 줌 (그 글을 지우면 다시 나타남)
+    .filter((l) => !sharedAlready(l))
     .slice(0, 200);
   const PICK_PAGE = 5;
   const pickPages = Math.max(1, Math.ceil(myLines.length / PICK_PAGE));
@@ -135,7 +142,7 @@ export default function Community({ mode }: { mode: BoardKind }) {
     const bad = badWordMessage(line.text);
     if (bad) return setError(bad);
     act(async () => {
-      await add({ type: 'share', from: me, fromName: myName, profileKey: line.profileKey, ...(line.mission ? { mission: line.mission.slice(0, 100) } : {}), text: line.text.slice(0, 300) });
+      await add({ type: 'share', from: me, fromName: myName, profileKey: line.profileKey, ...(line.mission ? { mission: line.mission.slice(0, 100) } : {}), src: line.id, text: line.text.slice(0, 300) });
       setPick('');
       showToast('📣 나눔 게시판에 올렸어요!', 'success');
     });
@@ -195,8 +202,12 @@ export default function Community({ mode }: { mode: BoardKind }) {
       {mode === 'share' && (
         <form onSubmit={share} className={`${card} space-y-3`}>
           <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Megaphone size={16} className="text-indigo-500" /> 내 실천 나누기</h4>
-          <p className="text-xs text-slate-500">내가 쓴 실천 기록 중 친구들과 나누고 싶은 것을 골라 주세요. 그날 고른 미션도 함께 올라가요.</p>
-          {myLines.length === 0 ? <p className="text-sm text-slate-500">아직 나눌 수 있는 실천 기록이 없어요. 미션을 실천하고 기록을 남겨 보세요.</p> : (
+          <p className="text-xs text-slate-500">내가 쓴 실천 기록 중 친구들과 나누고 싶은 것을 골라 주세요. 그날 고른 미션도 함께 올라가요. 이미 올린 기록은 목록에서 빠지고, 올린 글을 지우면 다시 나타나요.</p>
+          {myLines.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              {myShares.length > 0 ? '내 실천 기록을 모두 나눴어요! 새 기록을 남기면 여기에 나타나요.' : '아직 나눌 수 있는 실천 기록이 없어요. 미션을 실천하고 기록을 남겨 보세요.'}
+            </p>
+          ) : (
             <>
               <div role="radiogroup" aria-label="나눌 기록 고르기" className="space-y-2">
                 {pageLines.map((l) => {

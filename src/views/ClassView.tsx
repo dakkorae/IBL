@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { TimePeriod } from '../types';
 import PeriodTabs, { PERIODS } from '../components/PeriodTabs';
-import { Users, RefreshCw, Target, Star, MessageCircleHeart, CalendarCheck, PartyPopper } from 'lucide-react';
+import { Users, RefreshCw, Target, Star, MessageCircleHeart, CalendarCheck, PartyPopper, ChevronLeft, ChevronRight } from 'lucide-react';
 import { PROFILE_DATA, getLocalDateString, getPastDateString } from '../data';
 import { cloudMode } from '../cloud';
 import { FEEDBACK_STAMPS, goalProgress, myGoalCount } from '../cloud/stats';
@@ -23,6 +23,7 @@ export default function ClassView() {
   const { classData, classDataState, classSession, history, refreshClassData, setCurrentView, updateCommunity } = usePortfolio();
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('home');
   const [period, setPeriod] = useState<TimePeriod>('1year');
+  const [fbPage, setFbPage] = useState(1);
   const { info, stats, feedback } = classData;
 
   // 화면을 열 때마다 최신 정보로
@@ -92,9 +93,13 @@ export default function ClassView() {
   }));
   const radarMax = Math.max(0, ...radarData.map((d) => d.value));
 
-  const feedbackList = (Object.entries(feedback) as [string, Feedback][])
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .slice(0, 10);
+  // 선생님 피드백: 최근 것부터 5개씩 쪽을 나눠 보여 줌
+  const FB_PAGE = 5;
+  const allFeedback = (Object.entries(feedback) as [string, Feedback][]).sort((a, b) => b[0].localeCompare(a[0]));
+  const fbPages = Math.max(1, Math.ceil(allFeedback.length / FB_PAGE));
+  const fbNow = Math.min(fbPage, fbPages);
+  const feedbackList = allFeedback.slice((fbNow - 1) * FB_PAGE, fbNow * FB_PAGE);
+  const pageBtn = 'w-10 h-10 rounded-xl border border-slate-200 bg-white text-slate-600 inline-flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed';
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -217,11 +222,11 @@ export default function ClassView() {
           <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
             <MessageCircleHeart size={16} className="text-rose-500" /> 선생님이 남긴 피드백
           </h4>
-          <p className="text-xs text-slate-500 mt-1">나에게만 보여요.</p>
+          <p className="text-xs text-slate-500 mt-1">나에게만 보여요.{allFeedback.length > 0 && ` 모두 ${allFeedback.length}개`}</p>
           {feedbackList.length === 0 ? (
             <p className="mt-3 text-sm text-slate-500">아직 받은 피드백이 없어요.</p>
           ) : (
-            <ul className="mt-3 space-y-2 max-h-96 overflow-y-auto pr-1">
+            <ul className="mt-3 space-y-2">
               {feedbackList.map(([date, f]) => (
                 <li key={date} className="p-3 bg-rose-50/60 border border-rose-100 rounded-xl flex items-start gap-3">
                   <span className="text-2xl shrink-0">{f.stamp || '💬'}</span>
@@ -235,6 +240,13 @@ export default function ClassView() {
                 </li>
               ))}
             </ul>
+          )}
+          {fbPages > 1 && (
+            <div className="mt-3 flex items-center justify-center gap-2" aria-label="피드백 쪽 이동">
+              <button type="button" disabled={fbNow === 1} onClick={() => setFbPage(fbNow - 1)} aria-label="이전 피드백" className={pageBtn}><ChevronLeft size={16} /></button>
+              <span className="text-xs font-bold text-slate-600 min-w-16 text-center">{fbNow} / {fbPages}쪽</span>
+              <button type="button" disabled={fbNow === fbPages} onClick={() => setFbPage(fbNow + 1)} aria-label="다음 피드백" className={pageBtn}><ChevronRight size={16} /></button>
+            </div>
           )}
         </div>
       </div>
