@@ -55,6 +55,11 @@ export default function BoardWall({ entries, empty, me, onLike, actions, badge }
                 {entry.toName && (
                   <p className="text-sm font-black text-blue-700 break-words">To. {entry.toName}</p>
                 )}
+                {entry.mission && (
+                  <p className="text-xs font-bold text-slate-700 bg-white/70 border border-white rounded-lg px-2 py-1.5 leading-relaxed break-words">
+                    <span className="text-indigo-700">📌 미션</span> {entry.mission}
+                  </p>
+                )}
                 <p className="text-sm text-slate-800 leading-relaxed break-words whitespace-pre-line">{entry.text}</p>
               </div>
               <div className="px-3.5 py-2 bg-white/70 border-t border-white flex items-center gap-2">

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Send, Flag, Megaphone, Trash2 } from 'lucide-react';
 import { LearnerProfileKey } from '../../types';
-import { PROFILE_DATA } from '../../data';
+import { PROFILE_DATA, getMissionForDay } from '../../data';
 import { errorMessage, getBackend } from '../../cloud';
 import { BoardKind, Entry } from '../../cloud/types';
 import BoardWall from '../../components/BoardWall';
@@ -19,7 +19,7 @@ const chars = (t: string) => t.replace(/\s/g, '').length;
 // 우리 반 > 칭찬 게시판 · 나눔 게시판
 // - 글은 비속어 검사를 통과하면 바로 올라감 (선생님은 교사용 화면에서 글을 내릴 수 있음)
 export default function Community({ mode }: { mode: BoardKind }) {
-  const { classSession, history, updateCommunity, showToast } = usePortfolio();
+  const { classSession, history, customMissionsByDate, updateCommunity, showToast } = usePortfolio();
   const cid = classSession!.classId;
   const me = classSession!.sid;
   const myName = classSession!.nickname;
@@ -116,7 +116,12 @@ export default function Community({ mode }: { mode: BoardKind }) {
   const myLines = history
     .filter((r) => r.submitted)
     .sort((a, b) => b.date.localeCompare(a.date))
-    .flatMap((r) => (r.reflections || []).filter((x) => x.profileKey).map((x, i) => ({ id: `${r.date}#${i}`, date: r.date, ...x })))
+    .flatMap((r) =>
+      (r.reflections || [])
+        .filter((x) => x.profileKey)
+        // 그날 그 학습자상으로 실천한 미션 문장을 함께 찾아 둠
+        .map((x, i) => ({ id: `${r.date}#${i}`, date: r.date, ...x, mission: getMissionForDay(x.profileKey!, r.date, customMissionsByDate[r.date] as Record<string, string> | undefined) }))
+    )
     .slice(0, 15);
   const share = (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,7 +130,7 @@ export default function Community({ mode }: { mode: BoardKind }) {
     const bad = badWordMessage(line.text);
     if (bad) return setError(bad);
     act(async () => {
-      await add({ type: 'share', from: me, fromName: myName, profileKey: line.profileKey, text: line.text.slice(0, 300) });
+      await add({ type: 'share', from: me, fromName: myName, profileKey: line.profileKey, ...(line.mission ? { mission: line.mission.slice(0, 100) } : {}), text: line.text.slice(0, 300) });
       setPick('');
       showToast('📣 나눔 게시판에 올렸어요!', 'success');
     });
@@ -185,13 +190,28 @@ export default function Community({ mode }: { mode: BoardKind }) {
       {mode === 'share' && (
         <form onSubmit={share} className={`${card} space-y-3`}>
           <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Megaphone size={16} className="text-indigo-500" /> 내 실천 나누기</h4>
-          <p className="text-xs text-slate-500">내가 쓴 실천 기록 중 친구들과 나누고 싶은 것을 골라 주세요.</p>
+          <p className="text-xs text-slate-500">내가 쓴 실천 기록 중 친구들과 나누고 싶은 것을 골라 주세요. 그날 고른 미션도 함께 올라가요.</p>
           {myLines.length === 0 ? <p className="text-sm text-slate-500">아직 나눌 수 있는 실천 기록이 없어요. 미션을 실천하고 기록을 남겨 보세요.</p> : (
             <>
-              <select className={input} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="나눌 기록">
-                <option value="">나눌 기록 고르기</option>
-                {myLines.map((l) => <option key={l.id} value={l.id}>{l.date.slice(5)} {profileOf(l.profileKey)?.emoji} {l.text.slice(0, 40)}</option>)}
-              </select>
+              <div role="radiogroup" aria-label="나눌 기록 고르기" className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                {myLines.map((l) => {
+                  const p = profileOf(l.profileKey);
+                  const on = pick === l.id;
+                  return (
+                    <label key={l.id} className={`flex items-start gap-2.5 p-3 rounded-xl border-2 cursor-pointer transition-all ${on ? 'border-indigo-500 bg-indigo-50/60' : 'border-slate-200 bg-white hover:border-indigo-300'}`}>
+                      <input type="radio" name="share-pick" value={l.id} checked={on} onChange={() => setPick(l.id)} className="mt-1 w-4 h-4 shrink-0 accent-indigo-600" />
+                      <span className="min-w-0 flex-1 space-y-1">
+                        <span className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <span className="font-bold text-slate-500 whitespace-nowrap">{Number(l.date.slice(5, 7))}월 {Number(l.date.slice(8))}일</span>
+                          {p && <span className={`px-1.5 py-0.5 rounded-md font-bold whitespace-nowrap ${p.bgColor} ${p.textColor}`}>{p.emoji} {p.name}</span>}
+                        </span>
+                        {l.mission && <span className="block text-xs font-bold text-slate-700 break-words"><span className="text-indigo-700">📌 미션</span> {l.mission}</span>}
+                        <span className="block text-sm text-slate-800 break-words">{l.text}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
               <button type="submit" disabled={busy || !pick} className={primary}><Megaphone size={15} /> 게시판에 올리기</button>
             </>
           )}

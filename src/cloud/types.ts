@@ -79,6 +79,7 @@ export interface Entry {
   fromName: string;
   toName?: string; // 칭찬 받는 사람 (학생이 직접 적은 이름이나 닉네임)
   profileKey: LearnerProfileKey | null;
+  mission?: string; // 나눔 글: 그날 실천한 미션 문장
   text: string;
   createdAt: number;
   likes?: string[]; // 좋아요를 누른 학생 sid 목록 (개수는 모두에게 보임)
