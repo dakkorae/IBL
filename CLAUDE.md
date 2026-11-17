@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # IBL – IB 학습자상 포트폴리오 (작업 안내서)
 
 새 대화에서 이 파일만 읽으면 바로 이어서 작업할 수 있도록 정리한 문서입니다. 코드를 전부 다시 읽지 말고, 아래 지도에서 필요한 파일만 여세요.
@@ -14,6 +18,15 @@
 - 브라우저 자동화: Playwright + Chromium 이 미리 설치되어 있음(`require('playwright')`). 체험용 빌드를 `python3 -m http.server` 로 띄워 눌러 보고, 폭 320~1920 에서 겹침·넘침을 스크립트로 점검.
 - Google 서버 중 Firebase 본 서버(firestore.googleapis.com)는 막혀 있지만, **Firestore 에뮬레이터는 내려받아 돌릴 수 있음**(Java 있음) → 보안 규칙은 여기서 직접 시험(아래 확인 방법).
 - 임시 파일·캡처는 저장소 밖(세션 scratchpad)에 둠. 저장소에 넣지 않음.
+
+## 전체 구조 (여러 파일을 읽어야 보이는 큰 그림)
+- **주소로 화면 나누기**: `src/App.tsx` 가 `location.hash` 로 학생(`/`)·교사(`#teacher`)·관리자(`#admin`)를 고름. 교사·관리자 화면은 `lazy()` 로 따로 내려받아 학생 기기에는 실리지 않음. 교사·관리자 화면은 `PortfolioContext` 를 쓰지 않고 각자 상태를 가짐.
+- **학생 앱 상태**: `PortfolioContext.tsx` 의 `usePortfolioState()` 하나가 모든 상태와 동작을 만들어 Context 로 내려줌 → 화면(`src/views/*`)은 `usePortfolio()` 로 꺼내 씀. 새 동작은 이 훅에 넣고 반환 객체에 추가.
+- **서버 고르기**: `src/cloud/index.ts` 의 `cloudMode` — `VITE_CLOUD_DEMO=1` 이면 `demo`(localStorage 체험용), Firebase 설정이 있으면 `firebase`, 없으면 `off`(학급 기능 숨김). 서버 코드는 `getBackend()` 가 처음 필요할 때 `import()` 로 불러옴. 화면은 항상 `CloudBackend` 인터페이스만 부름.
+- **Firebase 설정값**: `src/cloud/firebaseConfig.ts` 기본값, `.env` 의 `VITE_FIREBASE_*` 가 있으면 그 값이 우선(`.env.example` 참고).
+- **앱이 켜지기 전 준비**: `src/main.tsx` 가 화면 테마를 먼저 적용(깜빡임 방지), `PortfolioContext.tsx` 를 불러올 때 `prepareMissionSeed()` 가 미션 씨앗값을 먼저 정함(저장된 기록을 읽기 전에).
+- **기기 저장 키**: 모두 `ib_` 로 시작하는 localStorage 키(`ib_portfolio_history`, `ib_custom_missions_by_date`, `ib_reroll_counts_by_date`, `ib_class_session`, `ib_teacher_classes`, `ib_daily_drafts`, `ib_mission_seed`, 체험용 서버 `ib_demo_cloud` 등). 키 이름을 바꾸면 기존 사용자 기록이 사라지므로 바꾸지 않음.
+- **보안은 규칙이 담당**: 비밀번호는 `src/cloud/util.ts` 의 해시 함수로만 보내고, 누가 무엇을 할 수 있는지는 `firestore.rules` 가 서버에서 검사함. 학생이 여러 칸을 함께 바꾸는 동작(등록, 게시판 글·좋아요·삭제, 비밀번호 재설정)은 `writeBatch` 한 번에 묶고, 규칙은 `getAfter()`·`existsAfter()` 와 `last`·`liked`·`removed` 같은 표시 칸으로 "자기 것 하나만 바꿨는지" 확인함. 서버 동작을 바꾸면 규칙과 `scripts/rules-test.mjs` 도 같이 고침.
 
 ## 파일 지도
 | 위치 | 내용 |
@@ -51,12 +64,14 @@
 - 교사 피드백은 **기록이 있는 날짜에만** 붙음(일괄 피드백도 그날 기록이 없는 학생은 건너뜀).
 - 오늘의 미션은 **학생마다 다름**: 날짜 + 학습자상 + 씨앗값(학급 참여 중이면 `학급코드:sid`, 아니면 기기에서 만든 임의 값 `ib_mission_seed`)으로 100가지 중 하나. 같은 학생·같은 날은 어느 기기에서나 같음. 씨앗값이 바뀔 때(학급 참여·나가기)는 `freezeMissions()` 로 기록한 날·쓰던 날의 미션을 `customMissionsByDate` 에 적어 두어 바뀌지 않게 함. ‘새로 뽑은 미션’ 표시와 다시 뽑기 배지는 바꾼 횟수(`rerollCountsByDate`)로 판단.
 - 기록은 기기(localStorage)에 먼저 저장하고 서버에 올림. 서버 실패해도 앱은 동작.
-- 읽기 횟수 절약: 학생이 자주 보는 것은 문서 하나에 모아 둠(`public/stats`, `public/board`).
+- 읽기 횟수 절약: 학생이 자주 보는 것은 문서 하나에 모아 둠(`public/stats`, `public/board`, `public/praise`).
 - Firestore `setDoc(..., {merge:true})` 에 **빈 객체를 넣으면 그 칸이 비워짐** → 바뀐 값이 있을 때만 담기.
 - 화면은 휴대폰(하단 탭)·태블릿·PC 반응형. 색은 `indigo`/`violet` 계열만 쓰면 테마가 자동 적용됨.
 
 ## 확인 방법
 ```bash
+npm run dev                                # 개발 서버 http://localhost:3000 (교사 화면은 /#teacher)
+npm run lint                               # = tsc --noEmit (타입 검사, 따로 ESLint 없음)
 npx tsc --noEmit && npm run build          # 타입 검사 + 빌드
 VITE_CLOUD_DEMO=1 npx vite build --outDir /tmp/demo   # 서버 없이 도는 체험용 (개설 코드 DEMO-2026, 관리자 키 demo-admin)
 ```
@@ -67,6 +82,7 @@ cp /home/user/IBL/scripts/rules-test.mjs .
 echo '{"firestore":{"rules":"/home/user/IBL/firestore.rules"},"emulators":{"firestore":{"port":8085,"host":"127.0.0.1"},"ui":{"enabled":false}}}' > firebase.json
 RULES=/home/user/IBL/firestore.rules npx firebase emulators:exec --only firestore --project demo-test "node rules-test.mjs"   # 마지막 줄 "통과 N / 실패 0"
 ```
+- 단위 시험 도구(Jest 등)는 없음. 자동 시험은 보안 규칙 시험 스크립트 하나뿐이고, 한 가지만 골라 돌리는 기능은 없음(스크립트 전체를 돌림). 화면 동작은 체험용 빌드를 Playwright 로 눌러 확인.
 - 실제 Firebase 서버 동작(배포된 사이트)은 여기서 확인 불가 → 체험용 빌드 + 규칙 시험으로 확인하고, 실제 확인은 사용자에게 부탁한다(무엇을 눌러 볼지 순서로 안내).
 - 커밋 메시지는 한국어, `feat(범위): …` 형식.
 
