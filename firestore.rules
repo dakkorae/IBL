@@ -49,6 +49,18 @@ service cloud.firestore {
     function canWipe(cid) {
       return isTeacher(cid) || isAdmin();
     }
+    // 교사 비밀번호 재설정이 올바른지 (secrets/teacher 를 바꿀 때)
+    function validReset(cid) {
+      let resetPath = /databases/$(db)/documents/classes/$(cid)/secrets/reset;
+      let r = get(resetPath).data;
+      return signedIn()
+        && exists(resetPath)
+        && request.resource.data.keys().hasOnly(['keyHash', 'resetHash'])
+        && request.resource.data.keyHash is string
+        && request.resource.data.resetHash == r.codeHash
+        && request.time < r.expiresAt
+        && resource.data.get('resetHash', '') != r.codeHash;
+    }
     // 닉네임: 1~12글자
     function validNick(nick) {
       return nick is string && nick.size() >= 1 && nick.size() <= 12;
@@ -158,11 +170,22 @@ service cloud.firestore {
       allow delete: if canWipe(cid);
 
       // 교사 비밀번호 해시: 학급을 만드는 묶음에서만 생성, 아무도 읽지 못함
+      // secrets/teacher { keyHash, resetHash? } : 교사 비밀번호 해시 (resetHash: 마지막으로 쓴 재설정 코드 → 같은 코드 재사용 막기)
+      // secrets/reset { codeHash, expiresAt } : 관리자가 발급한 비밀번호 재설정 코드의 해시와 만료 시각
       match /secrets/{docId} {
-        allow read, update: if false;
+        allow read: if false;
         allow create: if signedIn() && docId == 'teacher'
           && !exists(/databases/$(db)/documents/classes/$(cid))
           && existsAfter(/databases/$(db)/documents/classes/$(cid));
+        // 비밀번호 재설정: 관리자가 발급한 재설정 코드를 아는 사람만, 만료 전에, 한 번만 새 비밀번호로 바꿀 수 있음
+        allow update: if docId == 'teacher' && validReset(cid);
+        // 재설정 코드 발급(관리자만): 길어야 2일 안에 만료
+        allow create, update: if docId == 'reset' && isAdmin()
+          && exists(/databases/$(db)/documents/classes/$(cid))
+          && request.resource.data.keys().hasOnly(['codeHash', 'expiresAt'])
+          && request.resource.data.codeHash is string
+          && request.resource.data.expiresAt is timestamp
+          && request.resource.data.expiresAt <= request.time + duration.value(2, 'd');
         allow delete: if canWipe(cid);
       }
       // 교사로 등록된 기기: 교사 비밀번호 해시가 일치해야 만들 수 있음

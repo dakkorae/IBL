@@ -1,6 +1,6 @@
 // 보안 규칙(firestore.rules) 자동 시험. 실행 방법은 CLAUDE.md 의 "확인 방법" 참고 (Firestore 에뮬레이터 필요)
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp, deleteField, getDocs, collection, query, where } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp, deleteField, getDocs, collection, query, where, Timestamp } from 'firebase/firestore';
 import fs from 'fs';
 const env = await initializeTestEnvironment({ projectId: 'demo-test', firestore: { rules: fs.readFileSync(process.env.RULES || 'firestore.rules', 'utf8'), host: '127.0.0.1', port: 8085 } });
 await env.clearFirestore();
@@ -128,6 +128,29 @@ await ok('맞는 비밀번호로 s2 다른 기기 입장', setDoc(c(X, 'members/
 await ok('교사 학생 삭제', (() => { const b = writeBatch(T); ['portfolios', 'feedback', 'pins', 'students'].forEach((n) => b.delete(c(T, n + '/s2'))); return b.commit(); })());
 await ok('빈 자리 s2에 새 학생 등록', reg(B, 'devB', 2, '새친구', 'PB2'));
 
+// 8-1. 교사 비밀번호 재설정 (관리자가 재설정 코드 발급)
+await ok('관리자 로그인(재설정용)', setDoc(doc(AD, 'admins/admin'), { keyHash: 'ADMIN' }));
+const D = env.authenticatedContext('newDevice').firestore();
+const resetWith = (db, uid, code, key) => { const b = writeBatch(db); b.set(c(db, 'secrets/teacher'), { keyHash: key, resetHash: code }); b.set(c(db, 'teachers/' + uid), { keyHash: key }); return b.commit(); };
+await no('재설정 코드 없이 비밀번호 바꾸기', resetWith(D, 'newDevice', 'R1', 'NEWK'));
+await no('교사가 재설정 코드 발급', setDoc(c(T, 'secrets/reset'), { codeHash: 'R1', expiresAt: Timestamp.fromMillis(Date.now() + 3600e3) }));
+await no('관리자가 3일짜리 코드 발급', setDoc(c(AD, 'secrets/reset'), { codeHash: 'R1', expiresAt: Timestamp.fromMillis(Date.now() + 3 * 86400e3) }));
+await no('없는 학급에 코드 발급', setDoc(doc(AD, 'classes/NOPE/secrets/reset'), { codeHash: 'R1', expiresAt: Timestamp.fromMillis(Date.now() + 3600e3) }));
+await ok('관리자 재설정 코드 발급', setDoc(c(AD, 'secrets/reset'), { codeHash: 'R1', expiresAt: Timestamp.fromMillis(Date.now() + 86400e3) }));
+await no('관리자가 재설정 코드 읽기', getDoc(c(AD, 'secrets/reset')));
+await no('틀린 코드로 재설정', resetWith(D, 'newDevice', 'WRONG', 'NEWK'));
+await no('맞는 코드지만 다른 칸 끼워 넣기', (() => { const b = writeBatch(D); b.set(c(D, 'secrets/teacher'), { keyHash: 'NEWK', resetHash: 'R1', x: 1 }); return b.commit(); })());
+await no('재설정 코드로 남의 기기 등록', (() => { const b = writeBatch(D); b.set(c(D, 'secrets/teacher'), { keyHash: 'NEWK', resetHash: 'R1' }); b.set(c(D, 'teachers/outsider'), { keyHash: 'NEWK' }); return b.commit(); })());
+await ok('맞는 코드로 재설정 + 이 기기 교사 등록', resetWith(D, 'newDevice', 'R1', 'NEWK'));
+await ok('새 비밀번호로 학생 기록 읽기', getDoc(c(D, 'portfolios/s2')));
+await no('같은 코드 다시 사용', resetWith(X, 'outsider', 'R1', 'HACK'));
+await no('옛 비밀번호로 새 기기 등록', setDoc(c(X, 'teachers/outsider'), { keyHash: 'TK' }));
+await ok('새 비밀번호로 다른 기기 등록', setDoc(c(X, 'teachers/outsider'), { keyHash: 'NEWK' }));
+await ok('관리자 새 코드 발급(만료 지난 코드)', setDoc(c(AD, 'secrets/reset'), { codeHash: 'R2', expiresAt: Timestamp.fromMillis(Date.now() - 1000) }));
+await no('만료된 코드로 재설정', resetWith(D, 'newDevice', 'R2', 'K3'));
+await ok('교사 비밀번호 원래대로 맞춰 두기(시험용)', env.withSecurityRulesDisabled((cx) => setDoc(doc(cx.firestore(), 'classes/C1/secrets/teacher'), { keyHash: 'TK' })));
+await ok('시험용 기기 등록 정리', env.withSecurityRulesDisabled(async (cx) => { await deleteDoc(doc(cx.firestore(), 'classes/C1/teachers/outsider')); await deleteDoc(doc(cx.firestore(), 'classes/C1/teachers/newDevice')); }));
+
 // 8-2. 교사 로그아웃
 await no('다른 기기가 교사 등록 지우기', deleteDoc(c(X, 'teachers/teacher')));
 await ok('교사 로그아웃(자기 등록 지우기)', deleteDoc(c(T, 'teachers/teacher')));
@@ -151,7 +174,7 @@ await ok('관리자 학급 찾기', getDocs(query(collection(AD, 'classes'), whe
 await no('교사가 코드별 학급 목록 보기', getDocs(query(collection(T, 'classes'), where('inviteCode', '==', 'CODE'))));
 await ok('관리자 명단·기기·신고 목록', Promise.all(['students', 'members', 'teachers', 'reports', 'reactions', 'posts'].map((n) => getDocs(collection(AD, 'classes/C1/' + n)))));
 { const b = writeBatch(AD);
-  ['portfolios/s1', 'feedback/s1', 'pins/s1', 'students/s1', 'inbox/s1', 'public/board', 'public/praise', 'public/stats', 'members/devC', 'teachers/teacher', 'secrets/teacher'].forEach((n) => b.delete(c(AD, n)));
+  ['portfolios/s1', 'feedback/s1', 'pins/s1', 'students/s1', 'inbox/s1', 'public/board', 'public/praise', 'public/stats', 'members/devC', 'teachers/teacher', 'secrets/teacher', 'secrets/reset'].forEach((n) => b.delete(c(AD, n)));
   b.delete(c(AD));
   await ok('관리자 학급 통째로 삭제', b.commit()); }
 await no('일반인이 코드 삭제', deleteDoc(doc(X, 'inviteCodes/CODE')));

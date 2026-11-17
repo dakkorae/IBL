@@ -1,6 +1,6 @@
 import { BoardKind, Entry, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, MAX_CLASS_STUDENTS, NICK_CHANGE_DAYS, Student } from './types';
 import { emptyStats } from './stats';
-import { adminKeyHash, normalizeCode, pinHash, randomCode, teacherKeyHash } from './util';
+import { adminKeyHash, normalizeCode, pinHash, randomCode, resetCodeHash, teacherKeyHash } from './util';
 
 // 체험용 서버: 실제 서버 없이 이 브라우저 안(localStorage)에서만 동작함
 // - 서버 설정 전에 화면과 흐름을 미리 살펴보기 위한 것 (다른 기기와는 공유되지 않음)
@@ -8,6 +8,7 @@ import { adminKeyHash, normalizeCode, pinHash, randomCode, teacherKeyHash } from
 interface DemoClass {
   info: ClassInfo;
   inviteCode?: string;
+  reset?: { hash: string; expiresAt: number; used?: boolean };
   teacherHash: string;
   students: Record<string, Student>;
   pins: Record<string, string>;
@@ -108,6 +109,17 @@ export function createDemoBackend(): CloudBackend {
         .map((c) => ({ id: c.info.id, name: c.info.name, createdAt: c.info.createdAt }))
         .sort((a, b) => a.createdAt - b.createdAt);
     },
+    async createResetCode(classId) {
+      await wait();
+      const s = load();
+      if (!s.admin) throw new CloudError('permission', '관리자 권한이 없어요.');
+      const c = need(s, classId);
+      const code = `${randomCode(4)}-${randomCode(4)}-${randomCode(2)}`;
+      const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+      c.reset = { hash: await resetCodeHash(classId, code), expiresAt };
+      save(s);
+      return { code, expiresAt };
+    },
     async deleteInviteCode(code) {
       await wait();
       const s = load();
@@ -156,6 +168,17 @@ export function createDemoBackend(): CloudBackend {
       const s = load();
       s.teacherOf = s.teacherOf.filter((id) => !classIds.includes(id));
       save(s);
+    },
+    async resetTeacherPassword(classId, code, newPassword) {
+      await wait();
+      const s = load();
+      const c = s.classes[classId];
+      if (!c || !c.reset || c.reset.used || Date.now() > c.reset.expiresAt || c.reset.hash !== (await resetCodeHash(classId, code))) return false;
+      c.teacherHash = await teacherKeyHash(classId, newPassword);
+      c.reset.used = true;
+      if (!s.teacherOf.includes(classId)) s.teacherOf.push(classId);
+      save(s);
+      return true;
     },
     async isTeacher(classId) {
       const s = load();

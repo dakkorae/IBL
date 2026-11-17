@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LogOut, ShieldCheck, ChevronDown, ChevronUp, Loader2, Copy, Check, FlaskConical, Trash2 } from 'lucide-react';
+import { LogOut, ShieldCheck, ChevronDown, ChevronUp, KeyRound, Loader2, Copy, Check, FlaskConical, Trash2 } from 'lucide-react';
 import { cloudMode, errorMessage, getBackend } from '../cloud';
 import { InviteCode } from '../cloud/types';
 import { adminKeyHash } from '../cloud/util';
@@ -20,6 +20,15 @@ export default function AdminApp() {
   // 코드별로 개설된 학급 (펼쳤을 때만 서버에서 읽음)
   const [openCode, setOpenCode] = useState('');
   const [classesOf, setClassesOf] = useState<Record<string, { id: string; name: string; createdAt: number }[]>>({});
+  // 교사 비밀번호 재설정 코드: 발급한 직후 한 번만 화면에 보여 줌
+  const [resetFor, setResetFor] = useState(''); // 확인 중인 학급
+  const [issued, setIssued] = useState<Record<string, { code: string; expiresAt: number }>>({});
+  const issueReset = (classId: string) =>
+    run(async (b) => {
+      const r = await b.createResetCode(classId);
+      setIssued((m) => ({ ...m, [classId]: r }));
+      setResetFor('');
+    });
   const toggleClasses = (code: string) => {
     if (openCode === code) return setOpenCode('');
     setOpenCode(code);
@@ -173,11 +182,40 @@ export default function AdminApp() {
                                     {k.id} {copied === k.id ? <Check size={13} className="text-emerald-600" /> : <Copy size={12} className="text-slate-400" />}
                                   </button>
                                   <span className="text-[11px] text-slate-400 whitespace-nowrap">{new Date(k.createdAt).toLocaleDateString('ko-KR')} 개설</span>
+                                  {resetFor !== k.id && !issued[k.id] && (
+                                    <button type="button" disabled={busy} onClick={() => setResetFor(k.id)} className={`${btnGhost} !h-8 !px-2.5 !text-[11px]`}>
+                                      <KeyRound size={12} /> 비밀번호 재설정 코드
+                                    </button>
+                                  )}
+                                  {resetFor === k.id && (
+                                    <div className="w-full p-2.5 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
+                                      <p className="text-xs text-amber-900 leading-relaxed">
+                                        <b>{k.name}</b> 담임 선생님 본인이 요청한 것이 맞는지 먼저 확인해 주세요. 코드를 받은 사람은 이 학급의 교사 비밀번호를 새로 정할 수 있어요. (24시간 동안 한 번만 사용 가능)
+                                      </p>
+                                      <div className="flex flex-wrap gap-2">
+                                        <button type="button" disabled={busy} onClick={() => issueReset(k.id)} className={`${btnPrimary} !h-9 !px-3 !text-xs`}>
+                                          {busy ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />} 확인했어요, 코드 만들기
+                                        </button>
+                                        <button type="button" onClick={() => setResetFor('')} className={`${btnGhost} !h-9 !px-3 !text-xs`}>취소</button>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {issued[k.id] && (
+                                    <div className="w-full p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg space-y-1.5">
+                                      <p className="text-xs font-bold text-emerald-900">재설정 코드 (이 화면을 닫으면 다시 볼 수 없어요)</p>
+                                      <button type="button" onClick={() => copy(issued[k.id].code)} title="재설정 코드 복사" className="font-mono font-black tracking-widest text-lg text-emerald-800 inline-flex items-center gap-1.5 cursor-pointer break-all">
+                                        {issued[k.id].code} {copied === issued[k.id].code ? <Check size={14} className="text-emerald-600" /> : <Copy size={13} className="text-slate-400" />}
+                                      </button>
+                                      <p className="text-[11px] text-emerald-900 leading-relaxed">
+                                        {new Date(issued[k.id].expiresAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}까지 한 번만 쓸 수 있어요. 선생님께 학급 코드 <b className="font-mono">{k.id}</b>와 함께 알려 주시고, 교사 페이지의 ‘비밀번호를 잊었어요’에서 새 비밀번호를 정하도록 안내해 주세요.
+                                      </p>
+                                    </div>
+                                  )}
                                 </li>
                               ))}
                             </ul>
                           )}
-                          <p className="text-[11px] text-slate-500 mt-2">학급 코드만으로는 교사 화면에 들어갈 수 없어요. 교사 비밀번호가 함께 있어야 해요.</p>
+                          <p className="text-[11px] text-slate-500 mt-2">학급 코드만으로는 교사 화면에 들어갈 수 없어요. 선생님이 교사 비밀번호를 잊었다면 ‘비밀번호 재설정 코드’를 만들어 전해 주세요. (기존 비밀번호는 관리자도 볼 수 없어요)</p>
                         </div>
                       )}
                       {!c.active && confirmDelete !== c.code && (

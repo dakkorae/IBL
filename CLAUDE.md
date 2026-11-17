@@ -30,13 +30,13 @@
 | `src/cloud/firebaseBackend.ts` · `demoBackend.ts` | 실제 서버 구현 · 체험용 구현(localStorage). **둘을 항상 같이 고침** |
 | `src/cloud/stats.ts` | 학급 합계 계산, 공동 목표 진행도, 도장·스티커 목록 |
 | `src/teacher/*` | 교사용: TeacherApp(개설·열기), ClassDashboard(현황·학생(일괄 피드백)·활동(지난 활동)·관리), Inbox(소통: 담벼락·신고함), InviteQR(QR 초대), report(CSV), stats |
-| `src/admin/AdminApp.tsx` | 관리자: 개설 코드 발급·사용 중지·삭제, 코드별 개설된 학급(이름·학급 코드) 보기 |
-| `scripts/rules-test.mjs` | 보안 규칙 자동 시험(90가지) |
+| `src/admin/AdminApp.tsx` | 관리자: 개설 코드 발급·사용 중지·삭제, 코드별 개설된 학급(이름·학급 코드) 보기, 교사 비밀번호 재설정 코드 발급 |
+| `scripts/rules-test.mjs` | 보안 규칙 자동 시험(109가지) |
 | `firestore.rules` | 보안 규칙. **바꾸면 사용자가 Firebase 콘솔 규칙 탭에 다시 붙여 넣고 게시해야 함** (매번 안내) |
 | `docs/FIREBASE_SETUP.md` | 서버 연결 방법 |
 
 ## 서버 자료 구조 (`classes/{학급코드}/…`)
-`students`(명단) · `pins`·`secrets`(비밀번호 해시, 읽기 불가) · `members`·`teachers`(등록된 기기) · `portfolios/{sid}`(기록) · `feedback/{sid}` · `public/stats`(학급 합계) · `public/stats`의 `badges`(학생별 받은 배지 ID → 인원수만 표시) · `public/board`(나눔 게시판) · `public/praise`(칭찬 게시판) — 게시판 문서 모양은 `{ posts:{글ID:글}, last, likes:{글ID:{sid:true}}, liked, removed }` (last·liked·removed 는 방금 넣은/누른/지운 글 ID, 보안 규칙 검사용) · `reports`(불편해요). 학급 문서에는 `focus`·`goal`·`extraMissions`·`log`(지난 활동)·`maxStudents`. (`reactions`·`posts`·`inbox` 는 예전 방식, 이제 안 씀) 최상위: `inviteCodes`, `admins`, `config/admin`.
+`students`(명단) · `pins`·`secrets`(비밀번호 해시, 읽기 불가. `secrets/teacher {keyHash, resetHash}`, `secrets/reset {codeHash, expiresAt}`) · `members`·`teachers`(등록된 기기) · `portfolios/{sid}`(기록) · `feedback/{sid}` · `public/stats`(학급 합계) · `public/stats`의 `badges`(학생별 받은 배지 ID → 인원수만 표시) · `public/board`(나눔 게시판) · `public/praise`(칭찬 게시판) — 게시판 문서 모양은 `{ posts:{글ID:글}, last, likes:{글ID:{sid:true}}, liked, removed }` (last·liked·removed 는 방금 넣은/누른/지운 글 ID, 보안 규칙 검사용) · `reports`(불편해요). 학급 문서에는 `focus`·`goal`·`extraMissions`·`log`(지난 활동)·`maxStudents`. (`reactions`·`posts`·`inbox` 는 예전 방식, 이제 안 씀) 최상위: `inviteCodes`, `admins`, `config/admin`.
 
 ## 지켜 온 원칙
 - 개인정보 없음: 학급 코드 + 학생이 스스로 정한 닉네임 + 숫자 4자리 비밀번호. 이메일·실명 받지 않음. 학적 정보(이름·학교)는 학급 미참여 때만 쓰고 기기에만 저장.
@@ -45,6 +45,8 @@
 - 관리자가 개설 코드를 삭제하면 **그 코드로 만든 학급과 모든 자료가 함께 삭제**됨(경고 1회). 관리자는 지우기만 가능하고 학생 기록·게시글 내용은 읽지 못함. 관리자는 코드별 학급 이름·학급 코드를 볼 수 있음(선생님이 학급 코드를 잊었을 때 알려 주기용, 교사 비밀번호는 볼 수 없음).
 - 학생에게는 **학급 합계만** 보임. 개인별 실천 수치·순위 공개 금지(경쟁·거짓 체크 방지). 예외(사용자 결정): 게시판 좋아요 개수는 모두에게 보임, 배지는 ‘우리 반에서 n명이 획득’ 인원수만 보임.
 - 로그아웃(교사·관리자): 이 기기의 등록 문서(`teachers/{uid}`·`admins/{uid}`)만 지움. 익명 로그인 자체는 유지(같은 기기의 학생 참여에 영향 없게). 학급·기록은 그대로.
+- 교사 비밀번호 분실: 관리자가 학급별 ‘재설정 코드’(24시간, 1회용, 해시만 저장) 발급 → 교사 페이지 ‘교사 비밀번호를 잊었어요’에서 학급 코드 + 재설정 코드 + 새 비밀번호. 사용한 코드는 `secrets/teacher.resetHash` 에 남아 재사용 불가. 다른 기기의 기존 교사 등록은 그대로 유지됨.
+- 학급 개설·비밀번호 재설정 직후에는 학급 코드·비밀번호 기록 안내 화면(체크해야 들어감, 복사 버튼).
 - 학생 초대: 학급 코드 또는 QR(`/?join=학급코드` → 설정 화면의 참여 카드가 코드를 채워 줌).
 - 교사 피드백은 **기록이 있는 날짜에만** 붙음(일괄 피드백도 그날 기록이 없는 학생은 건너뜀).
 - 오늘의 미션은 **학생마다 다름**: 날짜 + 학습자상 + 씨앗값(학급 참여 중이면 `학급코드:sid`, 아니면 기기에서 만든 임의 값 `ib_mission_seed`)으로 100가지 중 하나. 같은 학생·같은 날은 어느 기기에서나 같음. 씨앗값이 바뀔 때(학급 참여·나가기)는 `freezeMissions()` 로 기록한 날·쓰던 날의 미션을 `customMissionsByDate` 에 적어 두어 바뀌지 않게 함. ‘새로 뽑은 미션’ 표시와 다시 뽑기 배지는 바꾼 횟수(`rerollCountsByDate`)로 판단.
@@ -83,6 +85,7 @@ RULES=/home/user/IBL/firestore.rules npx firebase emulators:exec --only firestor
 12. (11/17) 교사·관리자 페이지 로그아웃
 13. (11/17) 나눔: 이미 올린 기록은 고르기 목록에서 빠짐(글의 `src`=‘날짜#번호’, 예전 글은 학습자상+내용으로 판단), 글을 지우면 다시 나타남. 우리 반 현황의 선생님 피드백 5개씩 쪽 나눔
 14. (11/17) 관리자 페이지: 개설 코드별로 개설된 학급 이름·학급 코드 보기
+15. (11/17) 교사 비밀번호 재설정(관리자 발급 재설정 코드), 개설 직후 학급 코드·비밀번호 기록 안내
 
 ## 아직 안 한 것 / 아이디어
 - 성장 리포트 인쇄용 화면(PDF), 다크 모드, 학습자상 아이콘 세트

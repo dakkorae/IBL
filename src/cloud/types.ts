@@ -145,10 +145,14 @@ export interface CloudBackend {
   deleteInviteCode(code: string): Promise<number>;
   // 이 개설 코드로 만든 학급의 이름·학급 코드 (선생님이 학급 코드를 잊었을 때 알려 주기용)
   listClassesByInvite(code: string): Promise<{ id: string; name: string; createdAt: number }[]>;
+  // 교사 비밀번호 재설정 코드 발급 (24시간, 한 번만 사용). 코드 원문은 이때 한 번만 보여 줌
+  createResetCode(classId: string): Promise<{ code: string; expiresAt: number }>;
 
   // 교사
   createClass(input: { inviteCode: string; name: string; maxStudents: number; password: string }): Promise<ClassInfo>;
   teacherLogin(classId: string, password: string): Promise<boolean>;
+  // 관리자에게 받은 재설정 코드로 새 교사 비밀번호를 정하고 이 기기를 교사로 등록. 코드가 틀리거나 만료·사용됐으면 false
+  resetTeacherPassword(classId: string, code: string, newPassword: string): Promise<boolean>;
   isTeacher(classId: string): Promise<boolean>;
   teacherLogout(classIds: string[]): Promise<void>; // 이 기기의 교사 등록을 지움 (학급과 기록은 그대로)
   updateClassName(classId: string, name: string): Promise<void>;

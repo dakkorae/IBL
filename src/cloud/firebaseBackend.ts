@@ -15,10 +15,11 @@ import {
   where,
   setDoc,
   updateDoc,
-  writeBatch
+  writeBatch,
+  Timestamp
 } from 'firebase/firestore';
 import { BoardKind, Entry, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, JoinResult, MAX_CLASS_STUDENTS, NICK_CHANGE_DAYS, RegisterResult, RenameResult, Student } from './types';
-import { adminKeyHash, chunk, clean, normalizeCode, pinHash, randomCode, teacherKeyHash } from './util';
+import { adminKeyHash, chunk, clean, normalizeCode, pinHash, randomCode, resetCodeHash, teacherKeyHash } from './util';
 
 export interface FirebaseConfig {
   apiKey: string;
@@ -81,7 +82,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
     for (const name of ['posts', 'reactions', 'reports', 'members']) (await getDocs(sub(classId, name))).docs.forEach((d) => refs.push(d.ref));
     const teachers = await getDocs(sub(classId, 'teachers'));
     teachers.docs.filter((d) => d.id !== keepTeacher).forEach((d) => refs.push(d.ref));
-    refs.push(subDoc(classId, 'public', 'board'), subDoc(classId, 'public', 'praise'), subDoc(classId, 'public', 'stats'), subDoc(classId, 'secrets', 'teacher'), classRef(classId));
+    refs.push(subDoc(classId, 'public', 'board'), subDoc(classId, 'public', 'praise'), subDoc(classId, 'public', 'stats'), subDoc(classId, 'secrets', 'reset'), subDoc(classId, 'secrets', 'teacher'), classRef(classId));
     for (const part of chunk(refs, 10)) {
       const b = writeBatch(db);
       part.forEach((r) => b.delete(r));
@@ -135,6 +136,13 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       return snap.docs
         .map((d) => ({ id: d.id, name: String(d.data().name || ''), createdAt: Number(d.data().createdAt) || 0 }))
         .sort((a, b) => a.createdAt - b.createdAt);
+    },
+    async createResetCode(classId) {
+      await uid();
+      const code = `${randomCode(4)}-${randomCode(4)}-${randomCode(2)}`;
+      const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+      await setDoc(subDoc(classId, 'secrets', 'reset'), { codeHash: await resetCodeHash(classId, code), expiresAt: Timestamp.fromMillis(expiresAt) });
+      return { code, expiresAt };
     },
     async deleteInviteCode(code) {
       await uid();
@@ -192,6 +200,21 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       const id = await uid();
       // 이미 지워진 학급 등으로 실패해도 나머지는 계속 지움
       await Promise.all(classIds.map((cid) => deleteDoc(subDoc(cid, 'teachers', id)).catch((e) => console.error('교사 등록 지우기 실패', cid, e))));
+    },
+    async resetTeacherPassword(classId, code, newPassword) {
+      const id = await uid();
+      const keyHash = await teacherKeyHash(classId, newPassword);
+      // 새 비밀번호 저장 + 이 기기를 교사로 등록을 한 번에 (재설정 코드가 맞아야 서버가 허락함)
+      const batch = writeBatch(db);
+      batch.set(subDoc(classId, 'secrets', 'teacher'), { keyHash, resetHash: await resetCodeHash(classId, code) });
+      batch.set(subDoc(classId, 'teachers', id), { keyHash });
+      try {
+        await batch.commit();
+        return true;
+      } catch (e) {
+        if (isDenied(e)) return false;
+        throw e;
+      }
     },
     async isTeacher(classId) {
       const id = await uid();

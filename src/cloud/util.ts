@@ -9,6 +9,7 @@ export async function sha256(text: string): Promise<string> {
 
 export const adminKeyHash = (key: string) => sha256(`ib-admin:${key.trim()}`);
 export const teacherKeyHash = (classId: string, password: string) => sha256(`${classId}:teacher:${password}`);
+export const resetCodeHash = (classId: string, code: string) => sha256(`${classId}:reset:${normalizeCode(code)}`);
 export const pinHash = (classId: string, sid: string, pin: string) => sha256(`${classId}:${sid}:${pin}`);
 
 // 헷갈리는 글자(0/O, 1/I/L)를 뺀 코드용 글자
