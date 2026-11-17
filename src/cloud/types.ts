@@ -143,6 +143,8 @@ export interface CloudBackend {
   setInviteActive(code: string, active: boolean): Promise<void>;
   // 코드와 함께 그 코드로 만든 학급(학생 기록·게시글 포함)을 모두 지움. 지운 학급 수를 돌려줌
   deleteInviteCode(code: string): Promise<number>;
+  // 이 개설 코드로 만든 학급의 이름·학급 코드 (선생님이 학급 코드를 잊었을 때 알려 주기용)
+  listClassesByInvite(code: string): Promise<{ id: string; name: string; createdAt: number }[]>;
 
   // 교사
   createClass(input: { inviteCode: string; name: string; maxStudents: number; password: string }): Promise<ClassInfo>;

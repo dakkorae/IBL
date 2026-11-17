@@ -129,6 +129,13 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       await uid();
       await updateDoc(doc(db, 'inviteCodes', code), { active });
     },
+    async listClassesByInvite(code) {
+      await uid();
+      const snap = await getDocs(query(collection(db, 'classes'), where('inviteCode', '==', code)));
+      return snap.docs
+        .map((d) => ({ id: d.id, name: String(d.data().name || ''), createdAt: Number(d.data().createdAt) || 0 }))
+        .sort((a, b) => a.createdAt - b.createdAt);
+    },
     async deleteInviteCode(code) {
       await uid();
       // 이 코드로 만든 학급을 먼저 모두 지우고, 마지막에 코드를 지움 (중간에 끊겨도 다시 누르면 이어서 지워짐)

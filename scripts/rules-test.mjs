@@ -148,6 +148,7 @@ await no('관리자가 게시판 읽기', getDoc(c(AD, 'public/praise')));
 await no('일반인이 학급 목록 조회', getDocs(query(collection(X, 'classes'), where('inviteCode', '==', 'CODE'))));
 await no('일반인이 학급 지우기', deleteDoc(c(X)));
 await ok('관리자 학급 찾기', getDocs(query(collection(AD, 'classes'), where('inviteCode', '==', 'CODE'))));
+await no('교사가 코드별 학급 목록 보기', getDocs(query(collection(T, 'classes'), where('inviteCode', '==', 'CODE'))));
 await ok('관리자 명단·기기·신고 목록', Promise.all(['students', 'members', 'teachers', 'reports', 'reactions', 'posts'].map((n) => getDocs(collection(AD, 'classes/C1/' + n)))));
 { const b = writeBatch(AD);
   ['portfolios/s1', 'feedback/s1', 'pins/s1', 'students/s1', 'inbox/s1', 'public/board', 'public/praise', 'public/stats', 'members/devC', 'teachers/teacher', 'secrets/teacher'].forEach((n) => b.delete(c(AD, n)));

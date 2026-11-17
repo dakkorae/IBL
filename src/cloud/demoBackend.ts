@@ -99,6 +99,15 @@ export function createDemoBackend(): CloudBackend {
       save(s);
       return s.invites[code];
     },
+    async listClassesByInvite(code) {
+      await wait();
+      const s = load();
+      if (!s.admin) throw new CloudError('permission', '관리자 권한이 없어요.');
+      return Object.values(s.classes)
+        .filter((c) => c.inviteCode === code)
+        .map((c) => ({ id: c.info.id, name: c.info.name, createdAt: c.info.createdAt }))
+        .sort((a, b) => a.createdAt - b.createdAt);
+    },
     async deleteInviteCode(code) {
       await wait();
       const s = load();

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LogOut, ShieldCheck, Loader2, Copy, Check, FlaskConical, Trash2 } from 'lucide-react';
+import { LogOut, ShieldCheck, ChevronDown, ChevronUp, Loader2, Copy, Check, FlaskConical, Trash2 } from 'lucide-react';
 import { cloudMode, errorMessage, getBackend } from '../cloud';
 import { InviteCode } from '../cloud/types';
 import { adminKeyHash } from '../cloud/util';
@@ -17,6 +17,17 @@ export default function AdminApp() {
   const [copied, setCopied] = useState('');
   const [confirmDelete, setConfirmDelete] = useState('');
   const [notice, setNotice] = useState('');
+  // 코드별로 개설된 학급 (펼쳤을 때만 서버에서 읽음)
+  const [openCode, setOpenCode] = useState('');
+  const [classesOf, setClassesOf] = useState<Record<string, { id: string; name: string; createdAt: number }[]>>({});
+  const toggleClasses = (code: string) => {
+    if (openCode === code) return setOpenCode('');
+    setOpenCode(code);
+    run(async (b) => {
+      const list = await b.listClassesByInvite(code);
+      setClassesOf((m) => ({ ...m, [code]: list }));
+    });
+  };
   const [setupKey, setSetupKey] = useState('');
   const [setupHash, setSetupHash] = useState('');
 
@@ -144,6 +155,31 @@ export default function AdminApp() {
                       <button type="button" disabled={busy} onClick={() => run(async (b) => { await b.setInviteActive(c.code, !c.active); setCodes((list) => list.map((x) => (x.code === c.code ? { ...x, active: !c.active } : x))); })} className={`${btnGhost} !h-9 !px-3 !text-xs`}>
                         {c.active ? '사용 중지' : '다시 사용'}
                       </button>
+                      <button type="button" onClick={() => toggleClasses(c.code)} aria-expanded={openCode === c.code} className={`${btnGhost} !h-9 !px-3 !text-xs`}>
+                        {openCode === c.code ? <ChevronUp size={13} /> : <ChevronDown size={13} />} 개설된 학급
+                      </button>
+                      {openCode === c.code && (
+                        <div className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                          {!classesOf[c.code] ? (
+                            <p className="text-xs text-slate-500 inline-flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" /> 불러오는 중…</p>
+                          ) : classesOf[c.code].length === 0 ? (
+                            <p className="text-xs text-slate-500">이 코드로 개설된 학급이 없어요.</p>
+                          ) : (
+                            <ul className="space-y-1.5">
+                              {classesOf[c.code].map((k) => (
+                                <li key={k.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                                  <span className="font-bold text-slate-900 break-all">{k.name || '(이름 없음)'}</span>
+                                  <button type="button" onClick={() => copy(k.id)} title="학급 코드 복사" className="font-mono font-black tracking-widest text-indigo-700 inline-flex items-center gap-1 cursor-pointer">
+                                    {k.id} {copied === k.id ? <Check size={13} className="text-emerald-600" /> : <Copy size={12} className="text-slate-400" />}
+                                  </button>
+                                  <span className="text-[11px] text-slate-400 whitespace-nowrap">{new Date(k.createdAt).toLocaleDateString('ko-KR')} 개설</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          <p className="text-[11px] text-slate-500 mt-2">학급 코드만으로는 교사 화면에 들어갈 수 없어요. 교사 비밀번호가 함께 있어야 해요.</p>
+                        </div>
+                      )}
                       {!c.active && confirmDelete !== c.code && (
                         <button type="button" disabled={busy} onClick={() => { setConfirmDelete(c.code); setNotice(''); }} title="코드와 이 코드로 만든 학급 삭제" aria-label={`${c.code} 코드 삭제`} className={`${btnGhost} !h-9 !px-3 !text-xs`}>
                           <Trash2 size={13} /> 삭제
