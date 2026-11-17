@@ -1,6 +1,6 @@
 // 보안 규칙(firestore.rules) 자동 시험. 실행 방법은 CLAUDE.md 의 "확인 방법" 참고 (Firestore 에뮬레이터 필요)
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp, deleteField, getDocs, collection } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp, deleteField, getDocs, collection, query, where } from 'firebase/firestore';
 import fs from 'fs';
 const env = await initializeTestEnvironment({ projectId: 'demo-test', firestore: { rules: fs.readFileSync(process.env.RULES || 'firestore.rules', 'utf8'), host: '127.0.0.1', port: 8085 } });
 await env.clearFirestore();
@@ -94,6 +94,18 @@ await no('좋아요인 척 글 고치기', setDoc(c(B, 'public/praise'), { likes
 await ok('좋아요 뒤에도 글 추가 가능', setDoc(c(B, 'public/praise'), { posts: { p7: entry('p7', 's2') }, last: 'p7' }, { merge: true }));
 { const d = (await getDoc(c(A, 'public/praise'))).data(); if (Object.keys(d.posts).length !== 3 || Object.keys(d.likes.p1).length !== 2) { fail++; console.log('✗ 게시판 내용이 예상과 다름', JSON.stringify(d)); } else pass++; }
 
+// 6-2. 내 글 지우기
+const removeMine = (db, pid, extra = {}) => setDoc(c(db, 'public/praise'), { posts: { [pid]: deleteField() }, likes: { [pid]: deleteField() }, removed: pid, ...extra }, { merge: true });
+await ok('B 지울 글 추가', setDoc(c(B, 'public/praise'), { posts: { p8: entry('p8', 's2') }, last: 'p8' }, { merge: true }));
+await ok('A가 p8 좋아요', like(A, 'p8', 's1', true));
+await no('A가 B 글 지우기', removeMine(A, 'p8'));
+await no('B가 지우는 척 A 글 지우기', setDoc(c(B, 'public/praise'), { posts: { p2: deleteField() }, likes: { p2: deleteField() }, removed: 'p8' }, { merge: true }));
+await no('B가 지우면서 다른 글 고치기', setDoc(c(B, 'public/praise'), { posts: { p8: deleteField(), p2: entry('p2', 's2') }, likes: { p8: deleteField() }, removed: 'p8' }, { merge: true }));
+await ok('B가 자기 글 p8 지우기', removeMine(B, 'p8'));
+await ok('좋아요 없는 나눔 글 q1 지우기', setDoc(c(A, 'public/board'), { posts: { q1: deleteField() }, likes: { q1: deleteField() }, removed: 'q1' }, { merge: true }));
+{ const d = (await getDoc(c(A, 'public/praise'))).data(); if (d.posts.p8 || (d.likes || {}).p8 || Object.keys(d.posts).length !== 3) { fail++; console.log('✗ 내 글 지운 뒤 내용이 예상과 다름', JSON.stringify(d)); } else pass++; }
+await ok('지운 뒤에도 글 추가 가능', setDoc(c(A, 'public/board'), { posts: { q2: entry('q2', 's1', { type: 'share' }) }, last: 'q2' }, { merge: true }));
+
 // 7. 신고·교사 관리
 await ok('신고', setDoc(c(A, 'reports/p7_s1'), { postId: 'p7', sid: 's1', at: 1 }));
 await no('학생이 신고 목록 읽기', getDocs(collection(A, 'classes/C1/reports')));
@@ -120,6 +132,17 @@ await ok('빈 자리 s2에 새 학생 등록', reg(B, 'devB', 2, '새친구', 'P
 await no('틀린 관리자 키', setDoc(doc(X, 'admins/outsider'), { keyHash: 'NOPE' }));
 await ok('관리자 로그인', setDoc(doc(AD, 'admins/admin'), { keyHash: 'ADMIN' }));
 await ok('관리자 코드 삭제', deleteDoc(doc(AD, 'inviteCodes/OLD')));
+// 관리자가 코드를 지우면서 그 코드로 만든 학급을 통째로 지움
+await no('관리자가 학생 기록 읽기', getDoc(c(AD, 'portfolios/s1')));
+await no('관리자가 게시판 읽기', getDoc(c(AD, 'public/praise')));
+await no('일반인이 학급 목록 조회', getDocs(query(collection(X, 'classes'), where('inviteCode', '==', 'CODE'))));
+await no('일반인이 학급 지우기', deleteDoc(c(X)));
+await ok('관리자 학급 찾기', getDocs(query(collection(AD, 'classes'), where('inviteCode', '==', 'CODE'))));
+await ok('관리자 명단·기기·신고 목록', Promise.all(['students', 'members', 'teachers', 'reports', 'reactions', 'posts'].map((n) => getDocs(collection(AD, 'classes/C1/' + n)))));
+{ const b = writeBatch(AD);
+  ['portfolios/s1', 'feedback/s1', 'pins/s1', 'students/s1', 'inbox/s1', 'public/board', 'public/praise', 'public/stats', 'members/devC', 'teachers/teacher', 'secrets/teacher'].forEach((n) => b.delete(c(AD, n)));
+  b.delete(c(AD));
+  await ok('관리자 학급 통째로 삭제', b.commit()); }
 await no('일반인이 코드 삭제', deleteDoc(doc(X, 'inviteCodes/CODE')));
 
 console.log(`통과 ${pass} / 실패 ${fail}`);

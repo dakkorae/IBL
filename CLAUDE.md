@@ -30,17 +30,18 @@
 | `src/cloud/stats.ts` | 학급 합계 계산, 공동 목표 진행도, 도장·스티커 목록 |
 | `src/teacher/*` | 교사용: TeacherApp(개설·열기), ClassDashboard(현황·학생(일괄 피드백)·활동(지난 활동)·관리), Inbox(소통: 담벼락·신고함), InviteQR(QR 초대), report(CSV), stats |
 | `src/admin/AdminApp.tsx` | 관리자: 개설 코드 발급·사용 중지·삭제 |
-| `scripts/rules-test.mjs` | 보안 규칙 자동 시험(65가지) |
+| `scripts/rules-test.mjs` | 보안 규칙 자동 시험(81가지) |
 | `firestore.rules` | 보안 규칙. **바꾸면 사용자가 Firebase 콘솔 규칙 탭에 다시 붙여 넣고 게시해야 함** (매번 안내) |
 | `docs/FIREBASE_SETUP.md` | 서버 연결 방법 |
 
 ## 서버 자료 구조 (`classes/{학급코드}/…`)
-`students`(명단) · `pins`·`secrets`(비밀번호 해시, 읽기 불가) · `members`·`teachers`(등록된 기기) · `portfolios/{sid}`(기록) · `feedback/{sid}` · `public/stats`(학급 합계) · `public/stats`의 `badges`(학생별 받은 배지 ID → 인원수만 표시) · `public/board`(나눔 게시판) · `public/praise`(칭찬 게시판) — 게시판 문서 모양은 `{ posts:{글ID:글}, last, likes:{글ID:{sid:true}}, liked }` · `reports`(불편해요). 학급 문서에는 `focus`·`goal`·`extraMissions`·`log`(지난 활동)·`maxStudents`. (`reactions`·`posts`·`inbox` 는 예전 방식, 이제 안 씀) 최상위: `inviteCodes`, `admins`, `config/admin`.
+`students`(명단) · `pins`·`secrets`(비밀번호 해시, 읽기 불가) · `members`·`teachers`(등록된 기기) · `portfolios/{sid}`(기록) · `feedback/{sid}` · `public/stats`(학급 합계) · `public/stats`의 `badges`(학생별 받은 배지 ID → 인원수만 표시) · `public/board`(나눔 게시판) · `public/praise`(칭찬 게시판) — 게시판 문서 모양은 `{ posts:{글ID:글}, last, likes:{글ID:{sid:true}}, liked, removed }` (last·liked·removed 는 방금 넣은/누른/지운 글 ID, 보안 규칙 검사용) · `reports`(불편해요). 학급 문서에는 `focus`·`goal`·`extraMissions`·`log`(지난 활동)·`maxStudents`. (`reactions`·`posts`·`inbox` 는 예전 방식, 이제 안 씀) 최상위: `inviteCodes`, `admins`, `config/admin`.
 
 ## 지켜 온 원칙
 - 개인정보 없음: 학급 코드 + 학생이 스스로 정한 닉네임 + 숫자 4자리 비밀번호. 이메일·실명 받지 않음. 학적 정보(이름·학교)는 학급 미참여 때만 쓰고 기기에만 저장.
 - 학생 등록: 교사가 명단을 미리 만들지 않음. 학생이 등록하면 빈 자리 번호(`s1`~`s{정원}`, 정원 최대 100)를 차지함. 닉네임 변경은 본인 30일 1회(보안 규칙이 검사), 교사는 제한 없음.
-- 게시판은 교사 승인 없이 바로 게시(비속어 검사 통과 시). 사후 관리: 학생 ‘불편해요’ + 교사 ‘내리기’.
+- 게시판은 교사 승인 없이 바로 게시(비속어 검사 통과 시). 사후 관리: 학생 ‘불편해요’ + 교사 삭제. 학생은 자기 글만 지울 수 있음.
+- 관리자가 개설 코드를 삭제하면 **그 코드로 만든 학급과 모든 자료가 함께 삭제**됨(경고 1회). 관리자는 지우기만 가능하고 학생 기록·게시글 내용은 읽지 못함.
 - 학생에게는 **학급 합계만** 보임. 개인별 실천 수치·순위 공개 금지(경쟁·거짓 체크 방지). 예외(사용자 결정): 게시판 좋아요 개수는 모두에게 보임, 배지는 ‘우리 반에서 n명이 획득’ 인원수만 보임.
 - 학생 초대: 학급 코드 또는 QR(`/?join=학급코드` → 설정 화면의 참여 카드가 코드를 채워 줌).
 - 교사 피드백은 **기록이 있는 날짜에만** 붙음(일괄 피드백도 그날 기록이 없는 학생은 건너뜀).
@@ -73,6 +74,7 @@ RULES=/home/user/IBL/firestore.rules npx firebase emulators:exec --only firestor
 6. 학급 3단계: 칭찬 쪽지·나눔 게시판(교사 승인제)·공감 스티커·불편해요 알림, 우리 반 미션, CSV 리포트
 7. (11/15) 반응형 줄바꿈 정리(낱말 단위), 우리 반 레이더 기간 선택, 닉네임·비밀번호 직접 등록, 정원 100명, 공유 링크 기능 삭제, 칭찬 쪽지 → 칭찬 게시판, 비속어 필터 + 승인제 폐지
 8. (11/17) 게시판을 담벼락(패들렛) 모양 + 쪽 나눔 + 좋아요(개수 공개)로, 탭 순서 현황-나눔-칭찬, 배지 테두리 강조·‘우리 반에서 n명이 획득’, 관리자 코드 삭제, QR 초대, 일괄 피드백·피드백 문구 표시, 교사 소통 탭 담벼락·불편해요 신고함, 지난 활동 기록
+9. (11/17) 내 글 삭제·내가 쓴 글만 보기·좋아요를 신고 앞으로, 미션 카드 경계 강조, 교사 게시판의 불편해요 표시 제거(신고함에만), 코드 삭제 시 학급 일괄 삭제
 
 ## 아직 안 한 것 / 아이디어
 - 성장 리포트 인쇄용 화면(PDF), 다크 모드, 학습자상 아이콘 세트

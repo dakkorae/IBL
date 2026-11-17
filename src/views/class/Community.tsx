@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Send, Flag, Megaphone } from 'lucide-react';
+import { Loader2, Send, Flag, Megaphone, Trash2 } from 'lucide-react';
 import { LearnerProfileKey } from '../../types';
 import { PROFILE_DATA } from '../../data';
 import { errorMessage, getBackend } from '../../cloud';
@@ -28,6 +28,8 @@ export default function Community({ mode }: { mode: BoardKind }) {
   const [error, setError] = useState('');
   const [boards, setBoards] = useState<Record<BoardKind, Entry[]>>({ praise: [], share: [] });
   const [reported, setReported] = useState<string[]>([]);
+  const [onlyMine, setOnlyMine] = useState(false); // 내가 쓴 글만 보기
+  const [confirm, setConfirm] = useState(''); // 삭제를 한 번 더 확인 중인 글
   const [busy, setBusy] = useState(false);
   // 쓰기 양식
   const [to, setTo] = useState('');
@@ -139,7 +141,17 @@ export default function Community({ mode }: { mode: BoardKind }) {
   if (loading) {
     return <div className="py-16 flex items-center justify-center gap-2 text-slate-500 text-sm font-bold"><Loader2 size={18} className="animate-spin" /> 불러오는 중…</div>;
   }
-  const list = boards[mode];
+  // 내 글 지우기
+  const removeMine = (entry: Entry) =>
+    act(async () => {
+      await (await getBackend()).removeMyEntry(cid, entry.type, entry.id);
+      remember({ ...boards, [entry.type]: boards[entry.type].filter((e) => e.id !== entry.id) });
+      setConfirm('');
+      showToast('글을 지웠어요.', 'info');
+    });
+  const myCount = boards[mode].filter((e) => e.from === me).length;
+  const list = onlyMine ? boards[mode].filter((e) => e.from === me) : boards[mode];
+  const chip = 'shrink-0 h-8 px-2 rounded-full inline-flex items-center text-[11px] font-extrabold cursor-pointer whitespace-nowrap disabled:opacity-50';
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -189,15 +201,34 @@ export default function Community({ mode }: { mode: BoardKind }) {
       <div>
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-3 px-1">
           <h4 className="text-sm font-bold text-slate-800">{mode === 'praise' ? '💌 칭찬 게시판' : '📣 나눔 게시판'} ({list.length})</h4>
-          <p className="text-xs text-slate-500">♡를 눌러 마음을 전해요. 불편한 글은 깃발을 눌러 선생님께 알려 주세요.</p>
+          <div role="group" aria-label="보기" className="flex bg-slate-200/70 p-1 rounded-xl">
+            {[{ v: false, name: '모든 글' }, { v: true, name: `내가 쓴 글 ${myCount}` }].map((t) => (
+              <button key={t.name} type="button" aria-pressed={onlyMine === t.v} onClick={() => { setOnlyMine(t.v); setConfirm(''); }}
+                className={`h-9 px-3 rounded-lg text-xs font-extrabold cursor-pointer whitespace-nowrap transition-all ${onlyMine === t.v ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`}>
+                {t.name}
+              </button>
+            ))}
+          </div>
         </div>
+        <p className="text-xs text-slate-500 mb-3 px-1">♡를 눌러 마음을 전해요. 불편한 글은 깃발을 눌러 선생님께 알려 주세요. 내가 쓴 글은 휴지통으로 지울 수 있어요.</p>
         <BoardWall
           entries={list}
           me={me}
-          empty={mode === 'praise' ? '아직 올라온 칭찬이 없어요. 첫 번째로 칭찬해 볼까요?' : '아직 올라온 글이 없어요. 첫 번째로 나눠 볼까요?'}
+          empty={onlyMine ? '아직 내가 쓴 글이 없어요.' : mode === 'praise' ? '아직 올라온 칭찬이 없어요. 첫 번째로 칭찬해 볼까요?' : '아직 올라온 글이 없어요. 첫 번째로 나눠 볼까요?'}
           onLike={like}
           actions={(entry) =>
-            entry.from === me ? null : (
+            entry.from === me ? (
+              confirm === entry.id ? (
+                <>
+                  <button type="button" disabled={busy} onClick={() => removeMine(entry)} className={`${chip} bg-rose-600 text-white`}>지우기</button>
+                  <button type="button" onClick={() => setConfirm('')} className={`${chip} bg-slate-100 text-slate-600`}>취소</button>
+                </>
+              ) : (
+                <button type="button" onClick={() => setConfirm(entry.id)} title="내 글 지우기" aria-label="내 글 지우기" className="shrink-0 w-8 h-8 rounded-full inline-flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer">
+                  <Trash2 size={14} />
+                </button>
+              )
+            ) : (
               <button type="button" disabled={busy || reported.includes(entry.id)} onClick={() => report(entry)} title="불편해요 (선생님께 알리기)" aria-label={reported.includes(entry.id) ? '선생님께 알렸어요' : '불편해요, 선생님께 알리기'}
                 className={`shrink-0 w-8 h-8 rounded-full inline-flex items-center justify-center cursor-pointer disabled:cursor-default ${reported.includes(entry.id) ? 'text-rose-500' : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50'}`}>
                 <Flag size={13} fill={reported.includes(entry.id) ? 'currentColor' : 'none'} />

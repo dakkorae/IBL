@@ -138,12 +138,12 @@ export default function MissionView() {
               <div
                 key={profile.key}
                 onClick={() => !disabled && handleToggleMission(profile.key)}
-                className={`p-4 sm:p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between ${
+                className={`p-4 sm:p-5 rounded-2xl border-2 transition-all duration-200 flex flex-col justify-between ${
                   isRecentlyChanged
-                    ? 'ring-2 ring-amber-400 bg-amber-50/40 border-amber-300 shadow-md'
+                    ? 'ring-2 ring-amber-400 bg-amber-50/40 border-amber-400 shadow-md'
                     : isSelected
-                    ? `${profile.borderColor} ${profile.bgColor} ring-2 ring-indigo-500/15 shadow-md`
-                    : 'border-slate-100 bg-white hover:border-slate-200 hover:shadow-sm'
+                    ? `border-indigo-500 ${profile.bgColor} ring-2 ring-indigo-500/20 shadow-md`
+                    : 'border-slate-300 bg-white shadow-sm hover:border-indigo-300 hover:shadow-md'
                 } ${disabled ? 'cursor-not-allowed opacity-85' : 'cursor-pointer'}`}
               >
                 {/* Upper line: Emoji, Badge, Actions */}
@@ -179,7 +179,7 @@ export default function MissionView() {
                       className={`inline-flex items-center gap-1.5 px-2.5 h-10 whitespace-nowrap rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-xs ${
                         disabled || remainingCategoryRerolls <= 0
                           ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
-                          : 'bg-white hover:bg-amber-50 text-slate-700 hover:text-amber-800 border-slate-200 hover:border-amber-300 active:scale-95'
+                          : 'bg-white hover:bg-amber-50 text-slate-700 hover:text-amber-800 border-slate-400 hover:border-amber-400 active:scale-95'
                       }`}
                       title={
                         remainingCategoryRerolls > 0
@@ -203,7 +203,7 @@ export default function MissionView() {
                       className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${
                         isSelected
                           ? 'bg-indigo-600 border-indigo-600 text-white'
-                          : 'border-slate-200 bg-slate-50 text-transparent'
+                          : 'border-2 border-slate-400 bg-white text-transparent'
                       }`}
                     >
                       <Check size={18} strokeWidth={3} />
@@ -216,8 +216,8 @@ export default function MissionView() {
                   isRecentlyChanged
                     ? 'bg-amber-50/70 border-amber-200'
                     : isSelected
-                    ? 'bg-white/80 border-slate-100'
-                    : 'bg-slate-50/70 border-slate-100'
+                    ? 'bg-white/90 border-slate-300'
+                    : 'bg-slate-100/80 border-slate-300'
                 }`}>
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center space-x-1.5">

@@ -68,6 +68,27 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
   // 교사가 만들어 둔 빈 자리(예전 방식의 "3번")인지
   const isPlaceholder = (s: Student) => !s.claimed && s.nickname === `${s.number}번`;
 
+  // 학급의 하위 문서와 학급 문서를 모두 지움 (keepTeacher: 마지막에 따로 지울 교사 기기)
+  const wipeClass = async (classId: string, keepTeacher?: string) => {
+    const students = await getDocs(sub(classId, 'students'));
+    const refs = students.docs.flatMap((d) => [
+      subDoc(classId, 'portfolios', d.id),
+      subDoc(classId, 'feedback', d.id),
+      subDoc(classId, 'pins', d.id),
+      subDoc(classId, 'inbox', d.id),
+      subDoc(classId, 'students', d.id)
+    ]);
+    for (const name of ['posts', 'reactions', 'reports', 'members']) (await getDocs(sub(classId, name))).docs.forEach((d) => refs.push(d.ref));
+    const teachers = await getDocs(sub(classId, 'teachers'));
+    teachers.docs.filter((d) => d.id !== keepTeacher).forEach((d) => refs.push(d.ref));
+    refs.push(subDoc(classId, 'public', 'board'), subDoc(classId, 'public', 'praise'), subDoc(classId, 'public', 'stats'), subDoc(classId, 'secrets', 'teacher'), classRef(classId));
+    for (const part of chunk(refs, 10)) {
+      const b = writeBatch(db);
+      part.forEach((r) => b.delete(r));
+      await b.commit();
+    }
+  };
+
   const backend: CloudBackend = {
     kind: 'firebase',
 
@@ -106,7 +127,11 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
     },
     async deleteInviteCode(code) {
       await uid();
+      // 이 코드로 만든 학급을 먼저 모두 지우고, 마지막에 코드를 지움 (중간에 끊겨도 다시 누르면 이어서 지워짐)
+      const classes = await getDocs(query(collection(db, 'classes'), where('inviteCode', '==', code)));
+      for (const c of classes.docs) await wipeClass(c.id);
       await deleteDoc(doc(db, 'inviteCodes', code));
+      return classes.size;
     },
 
     // ---------------- 교사 ----------------
@@ -244,26 +269,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
     async deleteClass(classId) {
       const id = await uid();
       // 하위 문서를 모두 지운 뒤 학급 문서를 지우고, 마지막에 교사 등록을 지움
-      const students = await getDocs(sub(classId, 'students'));
-      const refs = students.docs.flatMap((d) => [
-        subDoc(classId, 'portfolios', d.id),
-        subDoc(classId, 'feedback', d.id),
-        subDoc(classId, 'pins', d.id),
-        subDoc(classId, 'students', d.id)
-      ]);
-      for (const name of ['posts', 'reactions', 'reports']) (await getDocs(sub(classId, name))).docs.forEach((d) => refs.push(d.ref));
-      students.docs.forEach((d) => refs.push(subDoc(classId, 'inbox', d.id)));
-      refs.push(subDoc(classId, 'public', 'board'), subDoc(classId, 'public', 'praise'));
-      const members = await getDocs(sub(classId, 'members'));
-      members.docs.forEach((d) => refs.push(d.ref));
-      const teachers = await getDocs(sub(classId, 'teachers'));
-      teachers.docs.filter((d) => d.id !== id).forEach((d) => refs.push(d.ref));
-      refs.push(subDoc(classId, 'public', 'stats'), subDoc(classId, 'secrets', 'teacher'), classRef(classId));
-      for (const part of chunk(refs, 10)) {
-        const b = writeBatch(db);
-        part.forEach((r) => b.delete(r));
-        await b.commit();
-      }
+      await wipeClass(classId, id);
       await deleteDoc(subDoc(classId, 'teachers', id));
     },
 
@@ -451,6 +457,11 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       return (Object.values((snap.data() || {}).posts || {}) as Entry[])
         .map((e) => ({ ...e, type: kind, likes: Object.keys(likes[e.id] || {}) }))
         .sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async removeMyEntry(classId, kind, postId) {
+      await uid();
+      // removed: 방금 지운 글의 ID. 보안 규칙이 "자기 글 하나만 지웠는지" 검사하는 데 씀
+      await setDoc(boardRef(classId, kind), { posts: { [postId]: deleteField() }, likes: { [postId]: deleteField() }, removed: postId }, { merge: true });
     },
     async setLike(classId, kind, postId, sid, on) {
       await uid();

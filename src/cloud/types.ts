@@ -138,7 +138,8 @@ export interface CloudBackend {
   listInviteCodes(): Promise<InviteCode[]>;
   createInviteCode(maxClasses: number, memo: string): Promise<InviteCode>;
   setInviteActive(code: string, active: boolean): Promise<void>;
-  deleteInviteCode(code: string): Promise<void>;
+  // 코드와 함께 그 코드로 만든 학급(학생 기록·게시글 포함)을 모두 지움. 지운 학급 수를 돌려줌
+  deleteInviteCode(code: string): Promise<number>;
 
   // 교사
   createClass(input: { inviteCode: string; name: string; maxStudents: number; password: string }): Promise<ClassInfo>;
@@ -178,6 +179,7 @@ export interface CloudBackend {
   getFeedback(classId: string, sid: string): Promise<FeedbackMap>;
   addEntry(classId: string, entry: Omit<Entry, 'id' | 'createdAt'>): Promise<Entry>;
   getBoard(classId: string, kind: BoardKind): Promise<Entry[]>;
+  removeMyEntry(classId: string, kind: BoardKind, postId: string): Promise<void>;
   setLike(classId: string, kind: BoardKind, postId: string, sid: string, on: boolean): Promise<void>;
   setMyBadges(classId: string, sid: string, badgeIds: string[]): Promise<void>;
   reportPost(classId: string, postId: string, sid: string): Promise<void>;

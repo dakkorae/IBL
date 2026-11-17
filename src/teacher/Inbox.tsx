@@ -84,11 +84,12 @@ export default function Inbox({ classId }: { classId: string }) {
         </button>
       </>
     );
+  // 불편해요 표시는 신고함에서만 보여 줌
   const badge = (entry: Entry) =>
-    reportCount(entry.id) > 0 ? (
+    tab === 'reports' && reportCount(entry.id) > 0 ? (
       <p className="flex flex-wrap items-center gap-1.5">
         <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-white bg-rose-600 rounded-full px-2 py-0.5 whitespace-nowrap"><Flag size={11} /> 불편해요 {reportCount(entry.id)}명</span>
-        {tab === 'reports' && <span className="text-[11px] font-bold text-slate-600 bg-white/80 rounded-full px-2 py-0.5 whitespace-nowrap">{entry.type === 'praise' ? '칭찬 게시판' : '나눔 게시판'}</span>}
+        <span className="text-[11px] font-bold text-slate-600 bg-white/80 rounded-full px-2 py-0.5 whitespace-nowrap">{entry.type === 'praise' ? '칭찬 게시판' : '나눔 게시판'}</span>
       </p>
     ) : null;
 

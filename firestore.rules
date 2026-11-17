@@ -44,6 +44,11 @@ service cloud.firestore {
         && member.data.pinHash == getAfter(/databases/$(db)/documents/classes/$(cid)/pins/$(sid)).data.pinHash;
     }
 
+    // 학급 자료를 지울 수 있는 사람: 그 학급의 교사, 또는 관리자(개설 코드를 삭제하면서 그 코드로 만든 학급을 함께 지울 때)
+    // - 관리자는 지우기와, 지울 문서를 찾는 데 필요한 목록(등록 기기·신고)만 볼 수 있고 학생 기록·게시글 내용은 읽지 못함
+    function canWipe(cid) {
+      return isTeacher(cid) || isAdmin();
+    }
     // 닉네임: 1~12글자
     function validNick(nick) {
       return nick is string && nick.size() >= 1 && nick.size() <= 12;
@@ -86,6 +91,22 @@ service cloud.firestore {
         && request.resource.data.likes.diff(before).affectedKeys().hasOnly([pid])
         && request.resource.data.likes[pid].diff(before.get(pid, {})).affectedKeys().hasOnly([sid])
         && request.resource.data.likes[pid].get(sid, true) == true;
+    }
+
+    // 내 글 지우기: 자기가 쓴 글 하나와 그 글의 좋아요만 지울 수 있음
+    // - 문서에 removed: 지운 글ID 를 함께 적음
+    function boardRemove(cid) {
+      let pid = request.resource.data.removed;
+      let before = resource.data.get('posts', {});
+      return isMember(cid)
+        && pid is string
+        && pid in before
+        && before[pid].from == memberSid(cid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['posts', 'likes', 'removed'])
+        && request.resource.data.posts.diff(before).removedKeys().hasOnly([pid])
+        && request.resource.data.posts.diff(before).affectedKeys().hasOnly([pid])
+        && request.resource.data.get('likes', {}).diff(resource.data.get('likes', {})).affectedKeys().hasOnly([pid])
+        && !(pid in request.resource.data.get('likes', {}));
     }
 
     // ---------- 관리자 ----------
@@ -134,7 +155,7 @@ service cloud.firestore {
       allow update: if isTeacher(cid)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'focus', 'goal', 'extraMissions', 'log'])
         && request.resource.data.name is string && request.resource.data.name.size() <= 40;
-      allow delete: if isTeacher(cid) || isAdmin();
+      allow delete: if canWipe(cid);
 
       // 교사 비밀번호 해시: 학급을 만드는 묶음에서만 생성, 아무도 읽지 못함
       match /secrets/{docId} {
@@ -142,23 +163,23 @@ service cloud.firestore {
         allow create: if signedIn() && docId == 'teacher'
           && !exists(/databases/$(db)/documents/classes/$(cid))
           && existsAfter(/databases/$(db)/documents/classes/$(cid));
-        allow delete: if isTeacher(cid);
+        allow delete: if canWipe(cid);
       }
       // 교사로 등록된 기기: 교사 비밀번호 해시가 일치해야 만들 수 있음
       match /teachers/{uid} {
         allow get: if signedIn() && request.auth.uid == uid;
-        allow list: if isTeacher(cid);
+        allow list: if canWipe(cid);
         allow create, update: if signedIn() && request.auth.uid == uid
           && request.resource.data.keys().hasOnly(['keyHash'])
           && request.resource.data.keyHash
              == getAfter(/databases/$(db)/documents/classes/$(cid)/secrets/teacher).data.keyHash;
-        allow delete: if isTeacher(cid);
+        allow delete: if canWipe(cid);
       }
 
       // 학생 명단 (자리 번호·닉네임만): 학급 코드를 아는 사람은 볼 수 있음
       match /students/{sid} {
         allow read: if signedIn();
-        allow delete: if isTeacher(cid);
+        allow delete: if canWipe(cid);
         // 학생이 스스로 등록: 같은 묶음에서 비밀번호와 기기 등록을 함께 만들어야 하고,
         // 자리 번호는 1 ~ 학급 정원(maxStudents, 없으면 100) 안이어야 함
         allow create: if isTeacher(cid)
@@ -190,69 +211,71 @@ service cloud.firestore {
         allow create: if signedIn()
           && existsAfter(/databases/$(db)/documents/classes/$(cid)/students/$(sid))
           && request.resource.data.keys().hasOnly(['pinHash']);
-        allow delete: if isTeacher(cid);
+        allow delete: if canWipe(cid);
       }
       // 학생으로 등록된 기기: 비밀번호 해시가 일치해야 만들 수 있음
       match /members/{uid} {
         allow get: if signedIn() && request.auth.uid == uid;
-        allow list: if isTeacher(cid);
+        allow list: if canWipe(cid);
         allow create, update: if signedIn() && request.auth.uid == uid
           && request.resource.data.keys().hasOnly(['sid', 'pinHash'])
           && request.resource.data.pinHash
              == getAfter(/databases/$(db)/documents/classes/$(cid)/pins/$(request.resource.data.sid)).data.pinHash;
-        allow delete: if (signedIn() && request.auth.uid == uid) || isTeacher(cid);
+        allow delete: if (signedIn() && request.auth.uid == uid) || canWipe(cid);
       }
       // 학급 합계(학생들에게 보여 주는 우리 반 현황): 개인별 수치 없이 합계만 담음
       // 학급에 참여한 기기와 교사가 읽고 씀. 교사 화면을 열 때마다 전체 기록으로 다시 계산해 바로잡음
       match /public/stats {
         allow get, create, update: if isTeacher(cid) || isMember(cid);
-        allow delete: if isTeacher(cid);
+        allow delete: if canWipe(cid);
       }
-      // 나눔 게시판 · 칭찬 게시판: 학급에 참여한 기기가 읽고, 자기 글 하나씩만 더하거나 좋아요를 누를 수 있음. 내리기는 교사만
+      // 나눔 게시판 · 칭찬 게시판: 학급에 참여한 기기가 읽고, 자기 글 하나씩만 더하거나 지우고, 좋아요를 누를 수 있음. 남의 글 내리기는 교사만
       match /public/board {
         allow get: if isTeacher(cid) || isMember(cid);
         allow create: if isTeacher(cid) || boardCreate(cid);
-        allow update: if isTeacher(cid) || boardAdd(cid) || boardLike(cid);
-        allow delete: if isTeacher(cid);
+        allow update: if isTeacher(cid) || boardAdd(cid) || boardLike(cid) || boardRemove(cid);
+        allow delete: if canWipe(cid);
       }
       match /public/praise {
         allow get: if isTeacher(cid) || isMember(cid);
         allow create: if isTeacher(cid) || boardCreate(cid);
-        allow update: if isTeacher(cid) || boardAdd(cid) || boardLike(cid);
-        allow delete: if isTeacher(cid);
+        allow update: if isTeacher(cid) || boardAdd(cid) || boardLike(cid) || boardRemove(cid);
+        allow delete: if canWipe(cid);
       }
       // (예전 방식) 승인 대기함과 쪽지함: 이제 쓰지 않음. 남아 있는 자료는 교사만 읽고 지울 수 있음
       match /inbox/{sid} {
-        allow read, delete: if isTeacher(cid);
+        allow read: if isTeacher(cid);
+        allow delete: if canWipe(cid);
       }
       match /posts/{pid} {
-        allow read, delete: if isTeacher(cid);
+        allow read, delete: if canWipe(cid);
       }
       // 공감 스티커: 누른 본인, 그 글의 글쓴이, 교사만 읽음 (다른 학생은 개수를 알 수 없음)
       match /reactions/{rid} {
-        allow read: if isTeacher(cid)
+        allow read: if canWipe(cid)
           || (isMember(cid) && (resource.data.sid == memberSid(cid) || resource.data.author == memberSid(cid)));
         allow create, update: if isMember(cid)
           && request.resource.data.sid == memberSid(cid)
           && rid == request.resource.data.postId + '_' + request.resource.data.sid;
-        allow delete: if isTeacher(cid) || (isMember(cid) && resource.data.sid == memberSid(cid));
+        allow delete: if canWipe(cid) || (isMember(cid) && resource.data.sid == memberSid(cid));
       }
       // 불편한 글 알리기: 학생이 만들고 교사만 읽음
       match /reports/{rid} {
         allow create, update: if isMember(cid) && request.resource.data.sid == memberSid(cid);
-        allow read, delete: if isTeacher(cid);
+        allow read, delete: if canWipe(cid);
       }
       // 교사 피드백: 교사가 쓰고, 해당 학생 본인만 읽음
       match /feedback/{sid} {
         allow get: if isTeacher(cid) || isStudent(cid, sid);
-        allow list, create, update, delete: if isTeacher(cid);
+        allow list, create, update: if isTeacher(cid);
+        allow delete: if canWipe(cid);
       }
       // 학생별 실천 기록: 본인과 교사만 읽고, 본인만 씀
       match /portfolios/{sid} {
         allow get: if isTeacher(cid) || isStudent(cid, sid);
         allow list: if isTeacher(cid);
         allow create, update: if isStudent(cid, sid);
-        allow delete: if isTeacher(cid);
+        allow delete: if canWipe(cid);
       }
     }
   }

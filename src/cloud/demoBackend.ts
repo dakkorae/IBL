@@ -7,6 +7,7 @@ import { adminKeyHash, normalizeCode, pinHash, randomCode, teacherKeyHash } from
 // - 체험용 관리자 키: demo-admin / 체험용 개설 코드: DEMO-2026
 interface DemoClass {
   info: ClassInfo;
+  inviteCode?: string;
   teacherHash: string;
   students: Record<string, Student>;
   pins: Record<string, string>;
@@ -94,9 +95,17 @@ export function createDemoBackend(): CloudBackend {
       return s.invites[code];
     },
     async deleteInviteCode(code) {
+      await wait();
       const s = load();
+      const ids = Object.keys(s.classes).filter((id) => s.classes[id].inviteCode === code);
+      ids.forEach((id) => {
+        delete s.classes[id];
+        delete s.memberOf[id];
+      });
+      s.teacherOf = s.teacherOf.filter((id) => !ids.includes(id));
       delete s.invites[code];
       save(s);
+      return ids.length;
     },
     async setInviteActive(code, active) {
       const s = load();
@@ -114,7 +123,7 @@ export function createDemoBackend(): CloudBackend {
       const id = randomCode(6);
       const students: Record<string, Student> = {};
       const info = { id, name: name.trim(), createdAt: Date.now(), maxStudents: Math.min(MAX_CLASS_STUDENTS, Math.max(1, Math.round(maxStudents) || MAX_CLASS_STUDENTS)) };
-      s.classes[id] = { info, teacherHash: await teacherKeyHash(id, password), students, pins: {}, portfolios: {} };
+      s.classes[id] = { info, inviteCode: inviteCode.trim().toUpperCase(), teacherHash: await teacherKeyHash(id, password), students, pins: {}, portfolios: {} };
       s.teacherOf.push(id);
       inv.usedCount += 1;
       save(s);
@@ -346,6 +355,15 @@ export function createDemoBackend(): CloudBackend {
     async getBoard(classId, kind) {
       await wait();
       return Object.values(need(load(), classId).boards?.[kind] || {}).sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async removeMyEntry(classId, kind, postId) {
+      const s = load();
+      const c = need(s, classId);
+      const e = c.boards?.[kind]?.[postId];
+      if (!e) return;
+      if (s.memberOf[classId] !== e.from) throw new CloudError('permission', '내가 쓴 글만 지울 수 있어요.');
+      delete c.boards![kind]![postId];
+      save(s);
     },
     async setLike(classId, kind, postId, sid, on) {
       const s = load();

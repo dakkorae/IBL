@@ -15,7 +15,7 @@ interface Props {
   empty: string;
   me?: string; // 내 sid (내 글 표시, 내가 누른 좋아요 표시)
   onLike?: (entry: Entry, on: boolean) => void; // 없으면 좋아요 수만 보여 줌 (교사 화면)
-  actions?: (entry: Entry) => React.ReactNode; // 쪽지 아래 오른쪽에 붙는 작은 버튼들 (불편해요, 내리기 …)
+  actions?: (entry: Entry) => React.ReactNode; // 좋아요 뒤에 붙는 작은 버튼들 (불편해요, 삭제 …)
   badge?: (entry: Entry) => React.ReactNode; // 쪽지 위쪽에 붙는 표시 (신고 수 …)
 }
 
@@ -63,7 +63,6 @@ export default function BoardWall({ entries, empty, me, onLike, actions, badge }
                   {isMine && <span className="ml-1 text-[10px] font-bold text-indigo-700 bg-indigo-100 rounded px-1 py-0.5">내 글</span>}
                   <span className="ml-1.5 text-slate-400">{dateText(entry.createdAt)}</span>
                 </p>
-                {actions?.(entry)}
                 {onLike ? (
                   <button
                     type="button"
@@ -79,6 +78,7 @@ export default function BoardWall({ entries, empty, me, onLike, actions, badge }
                     <Heart size={14} /> {likes.length}
                   </span>
                 )}
+                {actions?.(entry)}
               </div>
             </li>
           );
