@@ -3,8 +3,8 @@ import { Loader2, Send, Flag, Megaphone } from 'lucide-react';
 import { LearnerProfileKey } from '../../types';
 import { PROFILE_DATA } from '../../data';
 import { errorMessage, getBackend } from '../../cloud';
-import { REACTIONS } from '../../cloud/stats';
-import { BoardKind, Entry, Reaction, ReactionKind } from '../../cloud/types';
+import { BoardKind, Entry } from '../../cloud/types';
+import BoardWall from '../../components/BoardWall';
 import { badWordMessage } from '../../filter';
 import { usePortfolio } from '../../state/PortfolioContext';
 
@@ -15,29 +15,6 @@ const primary =
   'h-11 px-5 inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white text-sm font-extrabold rounded-xl cursor-pointer disabled:cursor-not-allowed';
 const profileOf = (key: LearnerProfileKey | null) => PROFILE_DATA.find((p) => p.key === key);
 const chars = (t: string) => t.replace(/\s/g, '').length;
-
-// 공감 스티커 줄: 내가 누른 것만 표시되고, 개수는 글쓴이에게만 보임
-function Stickers({ entry, mine, counts, onPick }: { entry: Entry; mine?: ReactionKind; counts?: Partial<Record<ReactionKind, number>>; onPick: (k: ReactionKind | null) => void; key?: string }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {REACTIONS.map((r) => (
-        <button
-          key={r.kind}
-          type="button"
-          aria-pressed={mine === r.kind}
-          aria-label={`${entry.fromName}의 글에 ${r.label}`}
-          onClick={() => onPick(mine === r.kind ? null : r.kind)}
-          className={`h-9 px-2.5 rounded-full border text-xs font-bold cursor-pointer transition-all ${
-            mine === r.kind ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
-          }`}
-        >
-          {r.emoji} {r.label}
-          {counts && counts[r.kind] ? <span className="ml-1 opacity-80">{counts[r.kind]}</span> : null}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 // 우리 반 > 칭찬 게시판 · 나눔 게시판
 // - 글은 비속어 검사를 통과하면 바로 올라감 (선생님은 교사용 화면에서 글을 내릴 수 있음)
@@ -50,8 +27,6 @@ export default function Community({ mode }: { mode: BoardKind }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [boards, setBoards] = useState<Record<BoardKind, Entry[]>>({ praise: [], share: [] });
-  const [mine, setMine] = useState<Reaction[]>([]);
-  const [toMe, setToMe] = useState<Reaction[]>([]);
   const [reported, setReported] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   // 쓰기 양식
@@ -74,10 +49,8 @@ export default function Community({ mode }: { mode: BoardKind }) {
     setError('');
     try {
       const b = await getBackend();
-      const [praise, share, rx] = await Promise.all([b.getBoard(cid, 'praise'), b.getBoard(cid, 'share'), b.getMyReactions(cid, me)]);
+      const [praise, share] = await Promise.all([b.getBoard(cid, 'praise'), b.getBoard(cid, 'share')]);
       remember({ praise, share });
-      setMine(rx.mine);
-      setToMe(rx.toMe);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -101,16 +74,20 @@ export default function Community({ mode }: { mode: BoardKind }) {
     }
   };
 
-  const react = (entry: Entry, kind: ReactionKind | null) =>
-    act(async () => {
-      await (await getBackend()).setReaction(cid, { postId: entry.id, sid: me, author: entry.from, kind });
-      setMine((list) => [...list.filter((r) => r.postId !== entry.id), ...(kind ? [{ postId: entry.id, sid: me, author: entry.from, kind }] : [])]);
-    });
-  const myKind = (id: string) => mine.find((r) => r.postId === id)?.kind;
-  const countsFor = (id: string) => {
-    const c: Partial<Record<ReactionKind, number>> = {};
-    toMe.filter((r) => r.postId === id).forEach((r) => (c[r.kind] = (c[r.kind] || 0) + 1));
-    return c;
+  // 좋아요: 화면에 먼저 반영하고 서버에 저장 (실패하면 되돌림)
+  const like = async (entry: Entry, on: boolean) => {
+    const apply = (v: boolean) =>
+      setBoards((b) => ({
+        ...b,
+        [entry.type]: b[entry.type].map((e) => (e.id === entry.id ? { ...e, likes: [...(e.likes || []).filter((x) => x !== me), ...(v ? [me] : [])] } : e))
+      }));
+    apply(on);
+    try {
+      await (await getBackend()).setLike(cid, entry.type, entry.id, me, on);
+    } catch (e) {
+      apply(!on);
+      setError(errorMessage(e));
+    }
   };
 
   const add = async (entry: Omit<Entry, 'id' | 'createdAt'>) => {
@@ -158,37 +135,6 @@ export default function Community({ mode }: { mode: BoardKind }) {
       setReported((l) => [...l, entry.id]);
       showToast('선생님께 알렸어요.', 'info');
     });
-
-  const postCard = (entry: Entry) => {
-    const p = profileOf(entry.profileKey);
-    const isMine = entry.from === me;
-    return (
-      <li key={entry.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
-        <div className="flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="font-black text-slate-800 break-all">{entry.fromName}</span>
-          {entry.toName && <span className="font-bold text-rose-600 break-all">→ {entry.toName}</span>}
-          {p && <span className={`px-1.5 py-0.5 rounded-md font-bold text-[10px] whitespace-nowrap ${p.bgColor} ${p.textColor}`}>{p.emoji} {p.name}</span>}
-          {isMine && <span className="px-1.5 py-0.5 rounded-md font-bold text-[10px] whitespace-nowrap bg-indigo-100 text-indigo-700">내 글</span>}
-        </div>
-        <p className="text-sm text-slate-800 break-words whitespace-pre-line">{entry.text}</p>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          {isMine ? (
-            <p className="text-xs font-bold text-slate-600">
-              받은 공감:{' '}
-              {REACTIONS.map((r) => `${r.emoji} ${countsFor(entry.id)[r.kind] || 0}`).join('  ')}
-            </p>
-          ) : (
-            <Stickers entry={entry} mine={myKind(entry.id)} onPick={(k) => react(entry, k)} />
-          )}
-          {!isMine && (
-            <button type="button" disabled={busy || reported.includes(entry.id)} onClick={() => report(entry)} className="h-9 px-2 text-[11px] font-bold text-slate-400 hover:text-rose-600 inline-flex items-center gap-1 cursor-pointer disabled:cursor-default whitespace-nowrap">
-              <Flag size={12} /> {reported.includes(entry.id) ? '알렸어요' : '불편해요'}
-            </button>
-          )}
-        </div>
-      </li>
-    );
-  };
 
   if (loading) {
     return <div className="py-16 flex items-center justify-center gap-2 text-slate-500 text-sm font-bold"><Loader2 size={18} className="animate-spin" /> 불러오는 중…</div>;
@@ -240,12 +186,25 @@ export default function Community({ mode }: { mode: BoardKind }) {
         </form>
       )}
 
-      <div className={card}>
-        <h4 className="text-sm font-bold text-slate-800">{mode === 'praise' ? '💌 칭찬 게시판' : '📣 나눔 게시판'} ({list.length})</h4>
-        <p className="text-xs text-slate-500 mt-1">공감 스티커를 눌러 마음을 전해요. 몇 개를 받았는지는 글쓴이만 볼 수 있어요. 불편한 글은 ‘불편해요’로 선생님께 알려 주세요.</p>
-        {list.length === 0 ? <p className="mt-3 text-sm text-slate-500">{mode === 'praise' ? '아직 올라온 칭찬이 없어요. 첫 번째로 칭찬해 볼까요?' : '아직 올라온 글이 없어요. 첫 번째로 나눠 볼까요?'}</p> : (
-          <ul className="mt-3 space-y-2">{list.slice(0, 100).map((n) => postCard(n))}</ul>
-        )}
+      <div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-3 px-1">
+          <h4 className="text-sm font-bold text-slate-800">{mode === 'praise' ? '💌 칭찬 게시판' : '📣 나눔 게시판'} ({list.length})</h4>
+          <p className="text-xs text-slate-500">♡를 눌러 마음을 전해요. 불편한 글은 깃발을 눌러 선생님께 알려 주세요.</p>
+        </div>
+        <BoardWall
+          entries={list}
+          me={me}
+          empty={mode === 'praise' ? '아직 올라온 칭찬이 없어요. 첫 번째로 칭찬해 볼까요?' : '아직 올라온 글이 없어요. 첫 번째로 나눠 볼까요?'}
+          onLike={like}
+          actions={(entry) =>
+            entry.from === me ? null : (
+              <button type="button" disabled={busy || reported.includes(entry.id)} onClick={() => report(entry)} title="불편해요 (선생님께 알리기)" aria-label={reported.includes(entry.id) ? '선생님께 알렸어요' : '불편해요, 선생님께 알리기'}
+                className={`shrink-0 w-8 h-8 rounded-full inline-flex items-center justify-center cursor-pointer disabled:cursor-default ${reported.includes(entry.id) ? 'text-rose-500' : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50'}`}>
+                <Flag size={13} fill={reported.includes(entry.id) ? 'currentColor' : 'none'} />
+              </button>
+            )
+          }
+        />
       </div>
     </div>
   );

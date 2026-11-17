@@ -8,29 +8,42 @@
 - 저장소 `dakkorae/IBL` 의 `main` 에 직접 커밋·푸시 → Vercel 자동 배포. 원본 `dakkorae/IB-learner` 는 건드리지 않음.
 - 주소: `/` 학생, `#teacher` 교사, `#admin` 관리자(개설 코드 발급).
 
+## 작업 환경 (Claude Code 클라우드 세션)
+- 세션마다 저장소를 새로 받은 임시 컴퓨터에서 작업함 → **올리지 않은 작업은 사라짐**. 시작하면 `npm ci` 부터.
+- 사용자 지시: 작업이 끝나면 **`main` 에 바로 커밋·푸시**(Vercel 자동 배포). 세션이 따로 정해 주는 작업용 가지는 쓰지 않음.
+- 브라우저 자동화: Playwright + Chromium 이 미리 설치되어 있음(`require('playwright')`). 체험용 빌드를 `python3 -m http.server` 로 띄워 눌러 보고, 폭 320~1920 에서 겹침·넘침을 스크립트로 점검.
+- Google 서버 중 Firebase 본 서버(firestore.googleapis.com)는 막혀 있지만, **Firestore 에뮬레이터는 내려받아 돌릴 수 있음**(Java 있음) → 보안 규칙은 여기서 직접 시험(아래 확인 방법).
+- 임시 파일·캡처는 저장소 밖(세션 scratchpad)에 둠. 저장소에 넣지 않음.
+
 ## 파일 지도
 | 위치 | 내용 |
 |---|---|
 | `src/state/PortfolioContext.tsx` | 학생 앱의 모든 상태·동작(제출, 백업, 학급 동기화). 가장 큰 파일 → 필요한 함수만 grep |
 | `src/views/*` | 학생 화면: Dashboard, Mission, Class(우리 반), Badges, Profiles, Settings |
-| `src/views/class/Community.tsx` | 칭찬 게시판 · 나눔 게시판 · 공감 스티커 |
+| `src/views/class/Community.tsx` | 나눔 게시판 · 칭찬 게시판 (글쓰기 양식 + 담벼락) |
+| `src/components/BoardWall.tsx` | 담벼락(패들렛 모양) + 쪽 나눔(12개) + 좋아요. 학생 게시판과 교사 소통 탭이 함께 씀 |
+| `src/components/PeriodTabs.tsx` | 기간 고르기(오늘~1년). 대시보드와 우리 반 레이더가 함께 씀 |
 | `src/filter.ts` | 비속어 걸러 내기(낱말 목록, AI 없음). 모든 글 입력 칸에서 `badWordMessage()` 로 검사 |
 | `src/data.ts` / `missionsData.ts` / `badges.ts` / `theme.ts` | 학습자상·날짜·통계 / 미션 1,000개 / 배지 판정 / 화면 테마 |
 | `src/cloud/types.ts` | 서버 자료형과 `CloudBackend` 인터페이스 (**서버 기능은 여기부터 추가**) |
 | `src/cloud/firebaseBackend.ts` · `demoBackend.ts` | 실제 서버 구현 · 체험용 구현(localStorage). **둘을 항상 같이 고침** |
 | `src/cloud/stats.ts` | 학급 합계 계산, 공동 목표 진행도, 도장·스티커 목록 |
-| `src/teacher/*` | 교사용: TeacherApp(개설·열기), ClassDashboard(현황·학생·활동·관리), Inbox(소통), report(CSV), stats |
+| `src/teacher/*` | 교사용: TeacherApp(개설·열기), ClassDashboard(현황·학생(일괄 피드백)·활동(지난 활동)·관리), Inbox(소통: 담벼락·신고함), InviteQR(QR 초대), report(CSV), stats |
+| `src/admin/AdminApp.tsx` | 관리자: 개설 코드 발급·사용 중지·삭제 |
+| `scripts/rules-test.mjs` | 보안 규칙 자동 시험(65가지) |
 | `firestore.rules` | 보안 규칙. **바꾸면 사용자가 Firebase 콘솔 규칙 탭에 다시 붙여 넣고 게시해야 함** (매번 안내) |
 | `docs/FIREBASE_SETUP.md` | 서버 연결 방법 |
 
 ## 서버 자료 구조 (`classes/{학급코드}/…`)
-`students`(명단) · `pins`·`secrets`(비밀번호 해시, 읽기 불가) · `members`·`teachers`(등록된 기기) · `portfolios/{sid}`(기록) · `feedback/{sid}` · `public/stats`(학급 합계) · `public/board`(나눔 게시판 글) · `public/praise`(칭찬 게시판 글) · `reactions` · `reports`. 최상위: `inviteCodes`, `admins`, `config/admin`.
+`students`(명단) · `pins`·`secrets`(비밀번호 해시, 읽기 불가) · `members`·`teachers`(등록된 기기) · `portfolios/{sid}`(기록) · `feedback/{sid}` · `public/stats`(학급 합계) · `public/stats`의 `badges`(학생별 받은 배지 ID → 인원수만 표시) · `public/board`(나눔 게시판) · `public/praise`(칭찬 게시판) — 게시판 문서 모양은 `{ posts:{글ID:글}, last, likes:{글ID:{sid:true}}, liked }` · `reports`(불편해요). 학급 문서에는 `focus`·`goal`·`extraMissions`·`log`(지난 활동)·`maxStudents`. (`reactions`·`posts`·`inbox` 는 예전 방식, 이제 안 씀) 최상위: `inviteCodes`, `admins`, `config/admin`.
 
 ## 지켜 온 원칙
 - 개인정보 없음: 학급 코드 + 학생이 스스로 정한 닉네임 + 숫자 4자리 비밀번호. 이메일·실명 받지 않음. 학적 정보(이름·학교)는 학급 미참여 때만 쓰고 기기에만 저장.
 - 학생 등록: 교사가 명단을 미리 만들지 않음. 학생이 등록하면 빈 자리 번호(`s1`~`s{정원}`, 정원 최대 100)를 차지함. 닉네임 변경은 본인 30일 1회(보안 규칙이 검사), 교사는 제한 없음.
 - 게시판은 교사 승인 없이 바로 게시(비속어 검사 통과 시). 사후 관리: 학생 ‘불편해요’ + 교사 ‘내리기’.
-- 학생에게는 **학급 합계만** 보임. 개인별 수치·순위·좋아요 개수 공개 금지(경쟁·거짓 체크 방지).
+- 학생에게는 **학급 합계만** 보임. 개인별 실천 수치·순위 공개 금지(경쟁·거짓 체크 방지). 예외(사용자 결정): 게시판 좋아요 개수는 모두에게 보임, 배지는 ‘우리 반에서 n명이 획득’ 인원수만 보임.
+- 학생 초대: 학급 코드 또는 QR(`/?join=학급코드` → 설정 화면의 참여 카드가 코드를 채워 줌).
+- 교사 피드백은 **기록이 있는 날짜에만** 붙음(일괄 피드백도 그날 기록이 없는 학생은 건너뜀).
 - 기록은 기기(localStorage)에 먼저 저장하고 서버에 올림. 서버 실패해도 앱은 동작.
 - 읽기 횟수 절약: 학생이 자주 보는 것은 문서 하나에 모아 둠(`public/stats`, `public/board`).
 - Firestore `setDoc(..., {merge:true})` 에 **빈 객체를 넣으면 그 칸이 비워짐** → 바뀐 값이 있을 때만 담기.
@@ -41,7 +54,14 @@
 npx tsc --noEmit && npm run build          # 타입 검사 + 빌드
 VITE_CLOUD_DEMO=1 npx vite build --outDir /tmp/demo   # 서버 없이 도는 체험용 (개설 코드 DEMO-2026, 관리자 키 demo-admin)
 ```
-- 작업 환경(클라우드 세션)에서는 Google 서버 접속이 막혀 **실제 Firebase 동작은 확인 불가**. 체험용 빌드를 브라우저 자동화로 확인하고, 실제 서버 확인은 사용자에게 부탁한다(무엇을 눌러 볼지 순서로 안내).
+- 보안 규칙을 바꿨으면 에뮬레이터로 시험(저장소 밖 임시 폴더에 도구 설치):
+```bash
+mkdir -p $TMP/emu && cd $TMP/emu && npm init -y && npm i firebase-tools @firebase/rules-unit-testing firebase
+cp /home/user/IBL/scripts/rules-test.mjs . 
+echo '{"firestore":{"rules":"/home/user/IBL/firestore.rules"},"emulators":{"firestore":{"port":8085,"host":"127.0.0.1"},"ui":{"enabled":false}}}' > firebase.json
+RULES=/home/user/IBL/firestore.rules npx firebase emulators:exec --only firestore --project demo-test "node rules-test.mjs"   # 마지막 줄 "통과 N / 실패 0"
+```
+- 실제 Firebase 서버 동작(배포된 사이트)은 여기서 확인 불가 → 체험용 빌드 + 규칙 시험으로 확인하고, 실제 확인은 사용자에게 부탁한다(무엇을 눌러 볼지 순서로 안내).
 - 커밋 메시지는 한국어, `feat(범위): …` 형식.
 
 ## 지금까지 (2026-11)
@@ -51,8 +71,8 @@ VITE_CLOUD_DEMO=1 npx vite build --outDir /tmp/demo   # 서버 없이 도는 체
 4. 학급 1단계: 개설 코드 → 학급 개설 → 학생 참여, 교사 현황·명단 관리
 5. 학급 2단계: 우리 반 메뉴(레이더·공동 목표·중점 학습자상), 교사 피드백
 6. 학급 3단계: 칭찬 쪽지·나눔 게시판(교사 승인제)·공감 스티커·불편해요 알림, 우리 반 미션, CSV 리포트
-
 7. (11/15) 반응형 줄바꿈 정리(낱말 단위), 우리 반 레이더 기간 선택, 닉네임·비밀번호 직접 등록, 정원 100명, 공유 링크 기능 삭제, 칭찬 쪽지 → 칭찬 게시판, 비속어 필터 + 승인제 폐지
+8. (11/17) 게시판을 담벼락(패들렛) 모양 + 쪽 나눔 + 좋아요(개수 공개)로, 탭 순서 현황-나눔-칭찬, 배지 테두리 강조·‘우리 반에서 n명이 획득’, 관리자 코드 삭제, QR 초대, 일괄 피드백·피드백 문구 표시, 교사 소통 탭 담벼락·불편해요 신고함, 지난 활동 기록
 
 ## 아직 안 한 것 / 아이디어
 - 성장 리포트 인쇄용 화면(PDF), 다크 모드, 학습자상 아이콘 세트

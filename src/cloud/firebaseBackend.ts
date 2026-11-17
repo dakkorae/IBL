@@ -17,7 +17,7 @@ import {
   updateDoc,
   writeBatch
 } from 'firebase/firestore';
-import { BoardKind, Entry, Reaction, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, JoinResult, MAX_CLASS_STUDENTS, NICK_CHANGE_DAYS, RegisterResult, RenameResult, Student } from './types';
+import { BoardKind, Entry, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, JoinResult, MAX_CLASS_STUDENTS, NICK_CHANGE_DAYS, RegisterResult, RenameResult, Student } from './types';
 import { adminKeyHash, chunk, clean, normalizeCode, pinHash, randomCode, teacherKeyHash } from './util';
 
 export interface FirebaseConfig {
@@ -103,6 +103,10 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
     async setInviteActive(code, active) {
       await uid();
       await updateDoc(doc(db, 'inviteCodes', code), { active });
+    },
+    async deleteInviteCode(code) {
+      await uid();
+      await deleteDoc(doc(db, 'inviteCodes', code));
     },
 
     // ---------------- 교사 ----------------
@@ -192,7 +196,11 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
     },
     async setClassStats(classId, stats) {
       await uid();
-      await setDoc(subDoc(classId, 'public', 'stats'), { ...clean(stats), updatedAt: Date.now() });
+      // 합계 칸만 통째로 바꿈 (학생들이 적어 둔 배지 현황 badges 는 그대로 둠)
+      const ref = subDoc(classId, 'public', 'stats');
+      const data = { totals: clean(stats.totals), records: stats.records, missions: stats.missions, days: clean(stats.days), updatedAt: Date.now() };
+      if ((await getDoc(ref)).exists()) await updateDoc(ref, data);
+      else await setDoc(ref, data);
     },
     async listFeedback(classId) {
       await uid();
@@ -205,10 +213,26 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       await uid();
       await setDoc(subDoc(classId, 'feedback', sid), { items: { [date]: feedback ? clean(feedback) : deleteField() } }, { merge: true });
     },
+    async setFeedbackMany(classId, sids, date, feedback) {
+      await uid();
+      for (const part of chunk(sids, 50)) {
+        const batch = writeBatch(db);
+        part.forEach((sid) => batch.set(subDoc(classId, 'feedback', sid), { items: { [date]: clean(feedback) } }, { merge: true }));
+        await batch.commit();
+      }
+    },
+    async clearReports(classId, postId) {
+      await uid();
+      const reports = await getDocs(query(sub(classId, 'reports'), where('postId', '==', postId)));
+      if (reports.empty) return;
+      const batch = writeBatch(db);
+      reports.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    },
     async removeEntry(classId, kind, postId) {
       await uid();
       const batch = writeBatch(db);
-      batch.set(boardRef(classId, kind), { posts: { [postId]: deleteField() } }, { merge: true });
+      batch.set(boardRef(classId, kind), { posts: { [postId]: deleteField() }, likes: { [postId]: deleteField() } }, { merge: true });
       const reports = await getDocs(query(sub(classId, 'reports'), where('postId', '==', postId)));
       reports.docs.forEach((d) => batch.delete(d.ref));
       await batch.commit();
@@ -216,10 +240,6 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
     async listReports(classId) {
       await uid();
       return (await getDocs(sub(classId, 'reports'))).docs.map((d) => d.data() as { postId: string; sid: string });
-    },
-    async listReactions(classId) {
-      await uid();
-      return (await getDocs(sub(classId, 'reactions'))).docs.map((d) => d.data() as Reaction);
     },
     async deleteClass(classId) {
       const id = await uid();
@@ -255,7 +275,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       const snap = await getDoc(classRef(cid));
       if (!snap.exists()) return null;
       const d = snap.data();
-      return { id: cid, name: String(d.name || ''), createdAt: Number(d.createdAt) || 0, maxStudents: Number(d.maxStudents) || MAX_CLASS_STUDENTS, focus: d.focus || null, goal: d.goal || null, extraMissions: d.extraMissions || null } as ClassInfo;
+      return { id: cid, name: String(d.name || ''), createdAt: Number(d.createdAt) || 0, maxStudents: Number(d.maxStudents) || MAX_CLASS_STUDENTS, focus: d.focus || null, goal: d.goal || null, extraMissions: d.extraMissions || null, log: d.log || null } as ClassInfo;
     },
     async listStudents(classId) {
       await uid();
@@ -375,7 +395,7 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
       const snap = await getDoc(subDoc(classId, 'public', 'stats'));
       if (!snap.exists()) return null;
       const d = snap.data();
-      return { totals: d.totals || {}, records: d.records || 0, missions: d.missions || 0, days: d.days || {}, updatedAt: d.updatedAt } as ClassPublicStats;
+      return { totals: d.totals || {}, records: d.records || 0, missions: d.missions || 0, days: d.days || {}, badges: d.badges || {}, updatedAt: d.updatedAt } as ClassPublicStats;
     },
     async applyStatsDelta(classId, deltas) {
       await uid();
@@ -427,23 +447,19 @@ export function createFirebaseBackend(config: FirebaseConfig): CloudBackend {
     async getBoard(classId, kind) {
       await uid();
       const snap = await getDoc(boardRef(classId, kind));
+      const likes = ((snap.data() || {}).likes || {}) as Record<string, Record<string, boolean>>;
       return (Object.values((snap.data() || {}).posts || {}) as Entry[])
-        .map((e) => ({ ...e, type: kind }))
+        .map((e) => ({ ...e, type: kind, likes: Object.keys(likes[e.id] || {}) }))
         .sort((a, b) => b.createdAt - a.createdAt);
     },
-    async getMyReactions(classId, sid) {
+    async setLike(classId, kind, postId, sid, on) {
       await uid();
-      const [mine, toMe] = await Promise.all([
-        getDocs(query(sub(classId, 'reactions'), where('sid', '==', sid))),
-        getDocs(query(sub(classId, 'reactions'), where('author', '==', sid)))
-      ]);
-      return { mine: mine.docs.map((d) => d.data() as Reaction), toMe: toMe.docs.map((d) => d.data() as Reaction) };
+      // liked: 방금 누른 글의 ID. 보안 규칙이 "그 글에서 자기 좋아요만 바꿨는지" 검사하는 데 씀
+      await setDoc(boardRef(classId, kind), { likes: { [postId]: { [sid]: on ? true : deleteField() } }, liked: postId }, { merge: true });
     },
-    async setReaction(classId, r) {
+    async setMyBadges(classId, sid, badgeIds) {
       await uid();
-      const ref = subDoc(classId, 'reactions', `${r.postId}_${r.sid}`);
-      if (r.kind) await setDoc(ref, { postId: r.postId, sid: r.sid, author: r.author, kind: r.kind });
-      else await deleteDoc(ref);
+      await setDoc(subDoc(classId, 'public', 'stats'), { badges: { [sid]: badgeIds } }, { merge: true });
     },
     async reportPost(classId, postId, sid) {
       await uid();

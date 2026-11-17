@@ -4,7 +4,7 @@ import PeriodTabs, { PERIODS } from '../components/PeriodTabs';
 import { Users, RefreshCw, Target, Star, MessageCircleHeart, CalendarCheck, PartyPopper } from 'lucide-react';
 import { PROFILE_DATA, getLocalDateString, getPastDateString } from '../data';
 import { cloudMode } from '../cloud';
-import { goalProgress, myGoalCount } from '../cloud/stats';
+import { FEEDBACK_STAMPS, goalProgress, myGoalCount } from '../cloud/stats';
 import { Feedback } from '../cloud/types';
 import RadarChart from '../components/RadarChart';
 import { usePortfolio } from '../state/PortfolioContext';
@@ -12,8 +12,8 @@ import Community from './class/Community';
 
 const TABS = [
   { key: 'home', name: '현황' },
-  { key: 'praise', name: '칭찬 게시판' },
-  { key: 'share', name: '나눔 게시판' }
+  { key: 'share', name: '나눔 게시판' },
+  { key: 'praise', name: '칭찬 게시판' }
 ] as const;
 
 const card = 'bg-white p-4 sm:p-6 rounded-2xl border border-slate-100 shadow-sm';
@@ -227,6 +227,9 @@ export default function ClassView() {
                   <span className="text-2xl shrink-0">{f.stamp || '💬'}</span>
                   <div className="min-w-0">
                     <p className="text-[11px] font-bold text-rose-600">{date} 기록</p>
+                    {f.stamp && FEEDBACK_STAMPS.find((x) => x.stamp === f.stamp) && (
+                      <p className="text-sm font-black text-slate-900">{FEEDBACK_STAMPS.find((x) => x.stamp === f.stamp)!.label}</p>
+                    )}
                     {f.text && <p className="text-sm text-slate-800 mt-0.5 break-words">{f.text}</p>}
                   </div>
                 </li>

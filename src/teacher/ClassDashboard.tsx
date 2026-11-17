@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Copy, Check, RefreshCw, Loader2, Users, CalendarCheck, Target, Eye, X, Download, KeyRound, Trash2, Pencil } from 'lucide-react';
+import { ArrowLeft, Copy, Check, RefreshCw, Loader2, Users, CalendarCheck, Target, Eye, X, Download, KeyRound, QrCode, History, Trash2, Pencil } from 'lucide-react';
 import { PROFILE_DATA, getLocalDateString, parseDateString } from '../data';
 import { errorMessage, getBackend } from '../cloud';
-import { ClassGoal, ClassInfo, CloudRecord, Feedback, FeedbackMap, MAX_CLASS_STUDENTS, NICKNAME_MAX, Student } from '../cloud/types';
+import { ActivityLogItem, ClassGoal, ClassInfo, CloudRecord, Feedback, FeedbackMap, MAX_CLASS_STUDENTS, NICKNAME_MAX, Student } from '../cloud/types';
 import { badWordMessage } from '../filter';
 import { FEEDBACK_STAMPS, computeStats, goalProgress } from '../cloud/stats';
 import RadarChart from '../components/RadarChart';
 import { StudentStat, buildClassStats, displayName, recentSchoolDays } from './stats';
 import Inbox from './Inbox';
+import InviteQR, { inviteUrl } from './InviteQR';
+import { QRCodeSVG } from 'qrcode.react';
 import { downloadClassSummary, downloadStudentReport } from './report';
 import { btnDanger, btnGhost, btnPrimary, card, input, label } from './ui';
 
@@ -41,6 +43,7 @@ export default function ClassDashboard({ classId, onBack, onRenamed, onGone }: P
   const [tab, setTab] = useState<Tab>('overview');
   const [detailId, setDetailId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showQR, setShowQR] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -116,10 +119,13 @@ export default function ClassDashboard({ classId, onBack, onRenamed, onGone }: P
           </div>
         </div>
         <div className="flex items-center gap-2 w-full sm:w-auto">
-          <button type="button" onClick={copyCode} title="학급 코드 복사" className="flex-1 sm:flex-none h-11 px-4 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 inline-flex items-center justify-center gap-2 cursor-pointer">
-            <span className="text-[11px] font-bold text-indigo-600">학급 코드</span>
-            <span className="font-mono font-black tracking-[0.25em] text-base">{classId}</span>
+          <button type="button" onClick={copyCode} title="학급 코드 복사" className="flex-1 min-w-0 sm:flex-none h-11 px-2.5 sm:px-4 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 inline-flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer">
+            <span className="text-[11px] font-bold text-indigo-600 whitespace-nowrap">학급 코드</span>
+            <span className="font-mono font-black tracking-[0.12em] sm:tracking-[0.25em] text-base">{classId}</span>
             {copied ? <Check size={15} className="text-emerald-600" /> : <Copy size={14} className="text-indigo-500" />}
+          </button>
+          <button type="button" onClick={() => setShowQR(true)} aria-label="QR 코드로 학생 초대" title="QR 코드로 학생 초대" className="h-11 min-w-11 sm:px-3 shrink-0 rounded-xl border border-slate-300 bg-white inline-flex items-center justify-center gap-1.5 text-sm font-bold text-slate-700 hover:bg-slate-50 cursor-pointer">
+            <QrCode size={17} /> <span className="hidden sm:inline">QR</span>
           </button>
           <button type="button" onClick={load} disabled={loading} aria-label="새로 고침" title="새로 고침" className="w-11 h-11 shrink-0 rounded-xl border border-slate-300 bg-white flex items-center justify-center text-slate-600 hover:bg-slate-50 cursor-pointer">
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
@@ -142,8 +148,16 @@ export default function ClassDashboard({ classId, onBack, onRenamed, onGone }: P
       {tab === 'overview' && <Overview cls={cls} today={today} onOpen={setDetailId} />}
       {tab === 'students' && (
         <>
-          <button type="button" onClick={() => downloadClassSummary(info.name, cls.stats)} className={btnGhost}><Download size={15} /> 학급 요약 내려받기 (엑셀용 CSV)</button>
-          <StudentList stats={cls.stats} onOpen={setDetailId} />
+          <div>
+            <button type="button" onClick={() => downloadClassSummary(info.name, cls.stats)} className={btnGhost}><Download size={15} /> 학급 요약 내려받기 (엑셀용 CSV)</button>
+          </div>
+          <StudentList
+            stats={cls.stats}
+            onOpen={setDetailId}
+            classId={classId}
+            today={today}
+            onSent={(sids, date, fb) => setFeedback((all) => ({ ...all, ...Object.fromEntries(sids.map((sid) => [sid, { ...(all[sid] || {}), [date]: fb }])) }))}
+          />
         </>
       )}
       {tab === 'activity' && (
@@ -151,8 +165,10 @@ export default function ClassDashboard({ classId, onBack, onRenamed, onGone }: P
       )}
       {tab === 'inbox' && <Inbox classId={classId} />}
       {tab === 'manage' && (
-        <Manage classId={classId} info={info} students={students} reload={load} onRenamed={(n) => { setInfo({ ...info, name: n }); onRenamed(n); }} onGone={onGone} />
+        <Manage classId={classId} info={info} students={students} reload={load} onShowQR={() => setShowQR(true)} onRenamed={(n) => { setInfo({ ...info, name: n }); onRenamed(n); }} onGone={onGone} />
       )}
+
+      {showQR && <InviteQR classId={classId} className={info.name} onClose={() => setShowQR(false)} />}
 
       {detail && (
         <StudentDetail
@@ -281,31 +297,109 @@ function Overview({ cls, today, onOpen }: { cls: ReturnType<typeof buildClassSta
 }
 
 // ------------------------------------------------------------------ 학생 목록
-function StudentList({ stats, onOpen }: { stats: StudentStat[]; onOpen: (id: string) => void }) {
+function StudentList({ stats, onOpen, classId, today, onSent }: { stats: StudentStat[]; onOpen: (id: string) => void; classId: string; today: string; onSent: (sids: string[], date: string, fb: Feedback) => void }) {
+  // 여러 학생을 골라 한꺼번에 피드백 남기기
+  const [picked, setPicked] = useState<string[]>([]);
+  const [date, setDate] = useState(today);
+  const [stamp, setStamp] = useState('');
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const hasRecord = (s: StudentStat) => s.records.some((r) => r.date === date);
+  const toggle = (id: string) => setPicked((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
+  const targets = stats.filter((s) => picked.includes(s.student.id) && hasRecord(s));
+  const skipped = picked.length - targets.length;
+
+  const send = async () => {
+    const bad = badWordMessage(text);
+    if (bad) return setMsg({ ok: false, text: bad });
+    setBusy(true);
+    setMsg(null);
+    try {
+      const fb: Feedback = { stamp, text: text.trim(), at: Date.now() };
+      const sids = targets.map((s) => s.student.id);
+      await (await getBackend()).setFeedbackMany(classId, sids, date, fb);
+      onSent(sids, date, fb);
+      setMsg({ ok: true, text: `${sids.length}명의 ${shortDate(date)} 기록에 피드백을 남겼어요.${skipped ? ` (그날 기록이 없는 ${skipped}명은 건너뛰었어요)` : ''}` });
+      setPicked([]);
+      setStamp('');
+      setText('');
+    } catch (e) {
+      setMsg({ ok: false, text: errorMessage(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-      {stats.map((s) => {
-        const max = Math.max(1, ...Object.values(s.totals));
-        return (
-          <button key={s.student.id} type="button" onClick={() => onOpen(s.student.id)} className={`${card} p-4 text-left hover:border-indigo-400 transition-all cursor-pointer`}>
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-extrabold text-slate-900 truncate">{displayName(s.student)}</span>
-              <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${s.student.claimed ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
-                {s.student.claimed ? '입장함' : '미입장'}
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              기록 {s.days}일 · 미션 {s.missions}개 · {s.lastDate ? `마지막 ${shortDate(s.lastDate)}` : '기록 없음'}
-            </p>
-            {/* 학습자상별 실천 분포 (작은 막대 10개) */}
-            <div className="mt-3 flex items-end gap-1 h-10" aria-hidden="true">
-              {PROFILE_DATA.map((p) => (
-                <span key={p.key} title={`${p.name} ${s.totals[p.key]}회`} className="flex-1 rounded-t" style={{ height: `${Math.max(6, (s.totals[p.key] / max) * 100)}%`, backgroundColor: s.totals[p.key] ? p.color : '#e2e8f0' }} />
-              ))}
-            </div>
+    <div className="space-y-3">
+      {/* 일괄 피드백 */}
+      <div className={`${card} p-4 space-y-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-extrabold text-slate-900">여러 학생에게 한꺼번에 피드백</h2>
+            <p className="text-xs text-slate-500 mt-0.5">아래 학생 카드의 체크 칸을 눌러 고른 뒤, 날짜와 도장을 정해 보내요. 고른 날짜에 기록이 있는 학생에게만 전달돼요.</p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => setPicked(stats.filter(hasRecord).map((s) => s.student.id))} className={`${btnGhost} !h-9 !px-3 !text-xs`}>그날 기록한 학생 모두</button>
+            <button type="button" onClick={() => setPicked(stats.map((s) => s.student.id))} className={`${btnGhost} !h-9 !px-3 !text-xs`}>전체 선택</button>
+            <button type="button" disabled={picked.length === 0} onClick={() => setPicked([])} className={`${btnGhost} !h-9 !px-3 !text-xs`}>선택 해제</button>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)} aria-label="피드백을 남길 기록 날짜" className={`${input} !w-auto !h-9`} />
+          {FEEDBACK_STAMPS.map((s) => (
+            <button key={s.stamp} type="button" aria-pressed={stamp === s.stamp} onClick={() => setStamp(stamp === s.stamp ? '' : s.stamp)}
+              className={`h-9 px-2.5 rounded-lg border text-xs font-bold cursor-pointer transition-all whitespace-nowrap ${stamp === s.stamp ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-slate-600 hover:border-indigo-400'}`}>
+              {s.stamp} {s.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input className={`${input} !h-10`} value={text} maxLength={100} onChange={(e) => setText(e.target.value)} placeholder="한 줄 남기기 (선택)" aria-label="여러 학생에게 남길 한 줄" />
+          <button type="button" disabled={busy || targets.length === 0 || (!stamp && !text.trim())} onClick={send} className={`${btnPrimary} !h-10 shrink-0`}>
+            {busy && <Loader2 size={15} className="animate-spin" />} {targets.length}명에게 보내기
           </button>
-        );
-      })}
+        </div>
+        {picked.length > 0 && (
+          <p className="text-xs font-bold text-slate-600">
+            {picked.length}명 선택{skipped > 0 && <span className="text-amber-700"> · 이 중 {skipped}명은 {shortDate(date)} 기록이 없어 건너뛰어요</span>}
+          </p>
+        )}
+        {msg && <p role="status" className={`text-sm font-bold ${msg.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{msg.ok ? '✅' : '⚠️'} {msg.text}</p>}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {stats.map((s) => {
+          const max = Math.max(1, ...Object.values(s.totals));
+          const on = picked.includes(s.student.id);
+          return (
+            <div key={s.student.id} className={`${card} relative transition-all ${on ? '!border-indigo-500 ring-2 ring-indigo-500/20' : 'hover:border-indigo-400'}`}>
+              <label className="absolute top-2 left-2 w-10 h-10 flex items-center justify-center cursor-pointer" title="피드백 보낼 학생으로 선택">
+                <input type="checkbox" checked={on} onChange={() => toggle(s.student.id)} aria-label={`${displayName(s.student)} 선택`} className="w-5 h-5 accent-indigo-600 cursor-pointer" />
+              </label>
+              <button type="button" onClick={() => onOpen(s.student.id)} className="w-full p-4 pl-12 text-left cursor-pointer">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-extrabold text-slate-900 truncate">{displayName(s.student)}</span>
+                  <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${hasRecord(s) ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+                    {shortDate(date)} {hasRecord(s) ? '기록함' : '기록 없음'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  기록 {s.days}일 · 미션 {s.missions}개 · {s.lastDate ? `마지막 ${shortDate(s.lastDate)}` : '기록 없음'}
+                </p>
+                {/* 학습자상별 실천 분포 (작은 막대 10개) */}
+                <div className="mt-3 flex items-end gap-1 h-10" aria-hidden="true">
+                  {PROFILE_DATA.map((p) => (
+                    <span key={p.key} title={`${p.name} ${s.totals[p.key]}회`} className="flex-1 rounded-t" style={{ height: `${Math.max(6, (s.totals[p.key] / max) * 100)}%`, backgroundColor: s.totals[p.key] ? p.color : '#e2e8f0' }} />
+                  ))}
+                </div>
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -467,9 +561,15 @@ function Activity({ classId, info, progress, onChange }: { classId: string; info
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const save = async (patch: Partial<Pick<ClassInfo, 'focus' | 'goal' | 'extraMissions'>>, text: string) => {
-    const bad = badWordMessage(patch.focus?.note, patch.goal?.title, ...Object.values(patch.extraMissions || {}).flatMap((list) => list || []));
+  const [logFilter, setLogFilter] = useState<'all' | ActivityLogItem['type']>('all');
+  const today = getLocalDateString();
+  const log = info.log || [];
+
+  // ended: 이번 저장으로 끝나는 활동 → '지난 활동'에 남김
+  const save = async (base: Partial<Pick<ClassInfo, 'focus' | 'goal' | 'extraMissions' | 'log'>>, text: string, ended: ActivityLogItem[] = []) => {
+    const bad = badWordMessage(base.focus?.note, base.goal?.title, ...Object.values(base.extraMissions || {}).flatMap((list) => list || []));
     if (bad) return setMsg({ ok: false, text: bad });
+    const patch = ended.length ? { ...base, log: [...ended, ...log].slice(0, 100) } : base;
     setBusy(true);
     setMsg(null);
     try {
@@ -486,9 +586,9 @@ function Activity({ classId, info, progress, onChange }: { classId: string; info
   const [mKey, setMKey] = useState<string>(PROFILE_DATA[0].key);
   const [mText, setMText] = useState('');
   const extra = info.extraMissions || {};
-  const saveMissions = (key: string, list: string[], text: string) => {
+  const saveMissions = (key: string, list: string[], text: string, removed?: string) => {
     const next = { ...extra, [key]: list };
-    return save({ extraMissions: next }, text);
+    return save({ extraMissions: next }, text, removed ? [{ type: 'mission', profileKey: key as ActivityLogItem['profileKey'], title: removed, to: today }] : []);
   };
   const goal = info.goal;
   const pct = goal ? Math.min(100, Math.round((progress / Math.max(1, goal.target)) * 100)) : 0;
@@ -498,7 +598,15 @@ function Activity({ classId, info, progress, onChange }: { classId: string; info
       {msg && <p role="status" className={`text-sm font-bold ${msg.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{msg.ok ? '✅' : '⚠️'} {msg.text}</p>}
       <p className="text-xs text-slate-500">여기에서 정한 내용은 학생 화면의 ‘우리 반’ 메뉴에 나타나요.</p>
 
-      <form className={`${card} p-4 sm:p-5 space-y-3`} onSubmit={(e) => { e.preventDefault(); save({ focus: focusKey ? { key: focusKey as ClassGoal['profileKey'] & string, note: note.trim() } : null }, focusKey ? '중점 학습자상을 정했어요.' : '중점 학습자상을 해제했어요.'); }}>
+      <form className={`${card} p-4 sm:p-5 space-y-3`} onSubmit={(e) => { e.preventDefault(); 
+        const old = info.focus;
+        const changed = !!old && old.key !== focusKey;
+        save(
+          { focus: focusKey ? { key: focusKey as ClassGoal['profileKey'] & string, note: note.trim(), since: old && !changed ? old.since || today : today } : null },
+          focusKey ? '중점 학습자상을 정했어요.' : '중점 학습자상을 해제했어요.',
+          changed ? [{ type: 'focus', profileKey: old!.key, title: old!.note, ...(old!.since ? { from: old!.since } : {}), to: today }] : []
+        );
+      }}>
         <h2 className="text-sm font-extrabold text-slate-900">⭐ 이번 주 중점 학습자상</h2>
         <p className="text-xs text-slate-500">학생의 미션 카드에 ‘이번 주 중점’ 표시가 붙어요. 탐구 단원과 연결해 정해 보세요.</p>
         <div>
@@ -553,7 +661,7 @@ function Activity({ classId, info, progress, onChange }: { classId: string; info
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="submit" disabled={busy} className={btnPrimary}>{goal ? '목표 고치기' : '목표 시작하기'}</button>
-          {goal && <button type="button" disabled={busy} onClick={() => { save({ goal: null }, '공동 목표를 끝냈어요.'); setTitle(''); }} className={btnGhost}>목표 끝내기</button>}
+          {goal && <button type="button" disabled={busy} onClick={() => { save({ goal: null }, '공동 목표를 끝냈어요. ‘지난 활동’에서 다시 볼 수 있어요.', [{ type: 'goal', profileKey: goal.profileKey, title: goal.title, from: goal.startDate, to: today, target: goal.target, done: progress }]); setTitle(''); }} className={btnGhost}>목표 끝내기</button>}
         </div>
       </form>
 
@@ -582,19 +690,62 @@ function Activity({ classId, info, progress, onChange }: { classId: string; info
               {((extra as Record<string, string[]>)[p.key] || []).map((m) => (
                 <li key={m} className="flex items-center gap-2 text-sm text-slate-700">
                   <span className="flex-1 min-w-0 break-keep">· {m}</span>
-                  <button type="button" disabled={busy} aria-label={`미션 지우기: ${m}`} onClick={() => saveMissions(p.key, ((extra as Record<string, string[]>)[p.key] || []).filter((x) => x !== m), '미션을 지웠어요.')} className="w-9 h-9 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center cursor-pointer"><Trash2 size={14} /></button>
+                  <button type="button" disabled={busy} aria-label={`미션 지우기: ${m}`} onClick={() => saveMissions(p.key, ((extra as Record<string, string[]>)[p.key] || []).filter((x) => x !== m), '미션을 지웠어요. ‘지난 활동’에 남겨 두었어요.', m)} className="w-9 h-9 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center cursor-pointer"><Trash2 size={14} /></button>
                 </li>
               ))}
             </ul>
           </div>
         ))}
       </form>
+
+      {/* 지난 활동: 끝난 중점 학습자상·공동 목표, 지운 우리 반 미션 */}
+      <div className={`${card} p-4 sm:p-5 space-y-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5"><History size={16} className="text-slate-500" /> 지난 활동 ({log.length})</h2>
+          <div className="flex flex-wrap gap-1 bg-slate-100 p-1 rounded-xl">
+            {([['all', '전체'], ['focus', '중점 학습자상'], ['goal', '공동 목표'], ['mission', '우리 반 미션']] as const).map(([k, name]) => (
+              <button key={k} type="button" aria-pressed={logFilter === k} onClick={() => setLogFilter(k)} className={`h-8 px-2.5 rounded-lg text-xs font-bold cursor-pointer whitespace-nowrap ${logFilter === k ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`}>{name}</button>
+            ))}
+          </div>
+        </div>
+        <p className="text-xs text-slate-500">중점 학습자상을 바꾸거나, 공동 목표를 끝내거나, 우리 반 미션을 지우면 여기에 차곡차곡 남아요. (교사에게만 보여요)</p>
+        {log.filter((x) => logFilter === 'all' || x.type === logFilter).length === 0 ? (
+          <p className="text-sm text-slate-500">아직 지난 활동이 없어요.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+            {log.map((x, i) => ({ x, i })).filter(({ x }) => logFilter === 'all' || x.type === logFilter).map(({ x, i }) => {
+              const p = PROFILE_DATA.find((q) => q.key === x.profileKey);
+              const reached = x.type === 'goal' && (x.done || 0) >= (x.target || 0);
+              return (
+                <li key={i} className="py-2.5 flex items-start gap-2.5">
+                  <span className="text-xl shrink-0" aria-hidden="true">{x.type === 'focus' ? '⭐' : x.type === 'goal' ? '🎯' : '🏫'}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs flex flex-wrap items-center gap-1.5">
+                      <span className="font-extrabold text-slate-700">{x.type === 'focus' ? '중점 학습자상' : x.type === 'goal' ? '공동 목표' : '우리 반 미션'}</span>
+                      <span className="text-slate-600 whitespace-nowrap">{p ? `${p.emoji} ${p.name}` : '모든 학습자상'}</span>
+                      {x.type === 'goal' && (
+                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold whitespace-nowrap ${reached ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
+                          {reached ? '🎉 달성' : '끝냄'} {x.done || 0} / {x.target}번
+                        </span>
+                      )}
+                    </p>
+                    {x.title && <p className="text-sm text-slate-900 font-semibold mt-0.5 break-words">{x.title}</p>}
+                    <p className="text-[11px] text-slate-500 mt-0.5">{x.from ? `${x.from} ~ ${x.to}` : `${x.to}까지`}</p>
+                  </div>
+                  <button type="button" disabled={busy} aria-label="이 기록 지우기" title="이 기록 지우기" onClick={() => save({ log: log.filter((_, n) => n !== i) }, '지난 활동 기록을 지웠어요.')} className="w-9 h-9 shrink-0 rounded-lg hover:bg-rose-50 text-slate-300 hover:text-rose-600 flex items-center justify-center cursor-pointer"><Trash2 size={14} /></button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
 
 // ------------------------------------------------------------------ 관리
-function Manage({ classId, info, students, reload, onRenamed, onGone }: {
+function Manage({ classId, info, students, reload, onRenamed, onGone, onShowQR }: {
+  onShowQR: () => void;
   classId: string; info: ClassInfo; students: Student[]; reload: () => Promise<void>; onRenamed: (name: string) => void; onGone: () => void;
 }) {
   const [name, setName] = useState(info.name);
@@ -635,6 +786,19 @@ function Manage({ classId, info, students, reload, onRenamed, onGone }: {
           <li>다른 기기에서는 <b>다시 들어오기</b>에서 같은 닉네임과 비밀번호를 넣으면 기록이 이어져요</li>
           <li>학생은 닉네임을 30일에 한 번 바꿀 수 있고, 선생님은 아래 명단에서 언제든 바꿀 수 있어요</li>
         </ol>
+        <div className="mt-4 p-3 bg-indigo-50/60 border border-indigo-100 rounded-xl flex flex-wrap items-center gap-4">
+          <button type="button" onClick={onShowQR} aria-label="초대 QR 코드 크게 보기" className="p-2 bg-white rounded-xl border border-slate-200 cursor-pointer shrink-0">
+            <QRCodeSVG value={inviteUrl(classId)} size={112} level="M" marginSize={0} />
+          </button>
+          <div className="min-w-0 flex-1 basis-48 space-y-2">
+            <p className="text-sm font-extrabold text-slate-900">QR 코드로 초대하기</p>
+            <p className="text-xs text-slate-600 leading-relaxed">학생이 태블릿·휴대폰 카메라로 찍으면 학급 코드가 입력된 참여 화면이 바로 열려요. 교실 화면에 크게 띄워 보세요.</p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={onShowQR} className={`${btnPrimary} !h-10`}><QrCode size={16} /> 크게 보기</button>
+              <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(inviteUrl(classId)); setDone('초대 주소를 복사했어요.'); } catch { setError('복사하지 못했어요.'); } }} className={`${btnGhost} !h-10`}><Copy size={14} /> 초대 주소 복사</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* 학급 이름 */}

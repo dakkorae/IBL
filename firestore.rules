@@ -73,6 +73,21 @@ service cloud.firestore {
         && request.resource.data.posts.diff(resource.data.get('posts', {})).affectedKeys().hasOnly([request.resource.data.last]);
     }
 
+    // 좋아요: 이미 있는 글 하나에서 자기 좋아요만 켜거나 끌 수 있음
+    // - 문서 모양: { likes: { 글ID: { 학생sid: true } }, liked: 방금 누른 글ID }
+    function boardLike(cid) {
+      let pid = request.resource.data.liked;
+      let sid = memberSid(cid);
+      let before = resource.data.get('likes', {});
+      return isMember(cid)
+        && pid is string
+        && pid in resource.data.get('posts', {})
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'liked'])
+        && request.resource.data.likes.diff(before).affectedKeys().hasOnly([pid])
+        && request.resource.data.likes[pid].diff(before.get(pid, {})).affectedKeys().hasOnly([sid])
+        && request.resource.data.likes[pid].get(sid, true) == true;
+    }
+
     // ---------- 관리자 ----------
     // config/admin { keyHash } 는 콘솔에서 직접 한 번 만들어 둠. 앱에서는 읽지도 쓰지도 못함
     match /config/{docId} {
@@ -115,9 +130,9 @@ service cloud.firestore {
         && getAfter(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.usedCount
            == get(/databases/$(db)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.usedCount + 1
         && existsAfter(/databases/$(db)/documents/classes/$(cid)/teachers/$(request.auth.uid));
-      // 교사가 바꿀 수 있는 것: 학급 이름, 중점 학습자상(focus), 공동 목표(goal), 우리 반 미션(extraMissions)
+      // 교사가 바꿀 수 있는 것: 학급 이름, 중점 학습자상(focus), 공동 목표(goal), 우리 반 미션(extraMissions), 지난 활동(log)
       allow update: if isTeacher(cid)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'focus', 'goal', 'extraMissions'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'focus', 'goal', 'extraMissions', 'log'])
         && request.resource.data.name is string && request.resource.data.name.size() <= 40;
       allow delete: if isTeacher(cid) || isAdmin();
 
@@ -193,17 +208,17 @@ service cloud.firestore {
         allow get, create, update: if isTeacher(cid) || isMember(cid);
         allow delete: if isTeacher(cid);
       }
-      // 나눔 게시판 · 칭찬 게시판: 학급에 참여한 기기가 읽고, 자기 글 하나씩만 더할 수 있음. 내리기는 교사만
+      // 나눔 게시판 · 칭찬 게시판: 학급에 참여한 기기가 읽고, 자기 글 하나씩만 더하거나 좋아요를 누를 수 있음. 내리기는 교사만
       match /public/board {
         allow get: if isTeacher(cid) || isMember(cid);
         allow create: if isTeacher(cid) || boardCreate(cid);
-        allow update: if isTeacher(cid) || boardAdd(cid);
+        allow update: if isTeacher(cid) || boardAdd(cid) || boardLike(cid);
         allow delete: if isTeacher(cid);
       }
       match /public/praise {
         allow get: if isTeacher(cid) || isMember(cid);
         allow create: if isTeacher(cid) || boardCreate(cid);
-        allow update: if isTeacher(cid) || boardAdd(cid);
+        allow update: if isTeacher(cid) || boardAdd(cid) || boardLike(cid);
         allow delete: if isTeacher(cid);
       }
       // (예전 방식) 승인 대기함과 쪽지함: 이제 쓰지 않음. 남아 있는 자료는 교사만 읽고 지울 수 있음

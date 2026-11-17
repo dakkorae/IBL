@@ -77,6 +77,8 @@ function usePortfolioState() {
 
   // 3. Current view & time filter period initialized synchronously
   const [currentView, setCurrentView] = useState<ViewType>(() => {
+    // 초대 QR(…?join=학급코드)로 들어오면 학급 참여 카드가 있는 설정 화면부터
+    if (new URLSearchParams(window.location.search).get('join')) return 'settings';
     try {
       const saved = localStorage.getItem('ib_current_view') as ViewType | null;
       if (saved && ['dashboard', 'mission', 'class', 'profiles', 'badges', 'settings'].includes(saved)) {
@@ -822,6 +824,27 @@ function usePortfolioState() {
     setClassSession(session);
     loadClassData(session);
   };
+
+  // 내가 받은 배지 목록을 학급 합계 문서에 적어 둠 → 배지 전당의 '우리 반에서 n명이 획득' (바뀌었을 때만 서버에 씀)
+  const unlockedIds = badgeStatuses.filter((b) => b.unlocked).map((b) => b.id).sort().join(',');
+  useEffect(() => {
+    if (!classSession) return;
+    const { classId, sid } = classSession;
+    const mark = `${classId}:${sid}:${unlockedIds}`;
+    if (localStorage.getItem('ib_badges_pushed') === mark) return;
+    const ids = unlockedIds ? unlockedIds.split(',') : [];
+    const timer = setTimeout(() => {
+      getBackend()
+        .then((b) => b.setMyBadges(classId, sid, ids))
+        .then(() => {
+          localStorage.setItem('ib_badges_pushed', mark);
+          setClassData((d) => (d.stats ? { ...d, stats: { ...d.stats, badges: { ...(d.stats.badges || {}), [sid]: ids } } } : d));
+        })
+        .catch((e) => console.error('배지 현황 저장 실패', e));
+    }, 1500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unlockedIds, classSession?.classId, classSession?.sid]);
 
   // 내 닉네임 바꾸기 (30일에 한 번, 서버 규칙이 검사)
   const renameSelf = async (nickname: string): Promise<RenameResult> => {

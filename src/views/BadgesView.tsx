@@ -8,7 +8,7 @@ const percentOf = (b: BadgeStatus) => Math.min(100, Math.round((b.progress / b.r
 const progressText = (b: BadgeStatus) => `${Math.min(b.progress, b.requiredCount)} / ${b.requiredCount}${b.unit}`;
 
 // 배지 카드 한 장 (깜짝 배지는 받기 전까지 이름과 조건을 가림)
-function BadgeCard({ badge }: { badge: BadgeStatus; key?: string }) {
+function BadgeCard({ badge, classCount }: { badge: BadgeStatus; classCount?: number | null; key?: string }) {
   const hidden = badge.secret && !badge.unlocked;
   const pct = percentOf(badge);
 
@@ -16,7 +16,7 @@ function BadgeCard({ badge }: { badge: BadgeStatus; key?: string }) {
     <div
       className={`p-4 rounded-2xl border flex flex-col gap-3 transition-all ${
         badge.unlocked
-          ? 'bg-white border-amber-200 shadow-sm ring-1 ring-amber-400/10'
+          ? 'bg-gradient-to-br from-amber-50 to-white border-2 border-amber-400 shadow-md shadow-amber-200/50 ring-2 ring-amber-300/40'
           : hidden
             ? 'bg-violet-50/50 border-dashed border-violet-200'
             : 'bg-white/70 border-slate-200'
@@ -26,7 +26,7 @@ function BadgeCard({ badge }: { badge: BadgeStatus; key?: string }) {
         <div
           className={`w-12 h-12 shrink-0 rounded-xl flex items-center justify-center text-2xl ${
             badge.unlocked
-              ? 'bg-amber-50 border border-amber-200'
+              ? 'bg-white border-2 border-amber-300 shadow-sm'
               : hidden
                 ? 'bg-violet-100 text-violet-400'
                 : 'bg-slate-100 grayscale opacity-50'
@@ -39,7 +39,7 @@ function BadgeCard({ badge }: { badge: BadgeStatus; key?: string }) {
           <h4 className="font-bold text-slate-800 text-sm flex flex-wrap items-center gap-1.5">
             <span className="break-keep">{hidden ? '???' : badge.name}</span>
             {badge.unlocked && (
-              <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded font-bold border border-amber-200">획득</span>
+              <span className="text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-extrabold whitespace-nowrap">✓ 획득</span>
             )}
           </h4>
           <p className="text-xs text-slate-500 font-medium mt-0.5 leading-relaxed break-keep">
@@ -50,6 +50,12 @@ function BadgeCard({ badge }: { badge: BadgeStatus; key?: string }) {
           )}
         </div>
       </div>
+
+      {classCount != null && (
+        <p className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-2 py-1 self-start">
+          🏫 우리 반에서 {classCount}명이 획득
+        </p>
+      )}
 
       {!badge.unlocked && !hidden && (
         <div className="space-y-1">
@@ -65,7 +71,10 @@ function BadgeCard({ badge }: { badge: BadgeStatus; key?: string }) {
 
 // ④ 배지 전당 화면
 export default function BadgesView() {
-  const { badgeStatuses, unlockedBadgeCount } = usePortfolio();
+  const { badgeStatuses, unlockedBadgeCount, classSession, classData } = usePortfolio();
+  // 우리 반에서 배지마다 몇 명이 받았는지 (학급에 참여했을 때만, 인원수만 보여 줌)
+  const classBadges = classSession ? classData.stats?.badges : undefined;
+  const classCount = (id: string): number | null => (classBadges ? Object.keys(classBadges).filter((sid) => (classBadges[sid] || []).includes(id)).length : null);
   const TOTAL_BADGE_COUNT = badgeStatuses.length;
   const totalPct = Math.round((unlockedBadgeCount / TOTAL_BADGE_COUNT) * 100);
 
@@ -170,7 +179,7 @@ export default function BadgesView() {
                             key={t.id}
                             title={`${t.name}: ${t.requirementDescription}`}
                             className={`rounded-xl border p-2 text-center ${
-                              t.unlocked ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-dashed border-slate-200'
+                              t.unlocked ? 'bg-amber-50 border-2 border-amber-400 shadow-sm' : 'bg-slate-50 border-dashed border-slate-200'
                             }`}
                           >
                             <div className={`text-xl ${t.unlocked ? '' : 'grayscale opacity-40'}`} aria-hidden="true">
@@ -183,9 +192,13 @@ export default function BadgesView() {
                               {!t.unlocked && <Lock size={8} />}
                               {t.requiredCount}회
                             </p>
+                            {classCount(t.id) != null && (
+                              <p className="text-[9px] text-indigo-700 font-bold mt-0.5 whitespace-nowrap" title={`우리 반에서 ${classCount(t.id)}명이 획득`}>🏫 {classCount(t.id)}명</p>
+                            )}
                           </div>
                         ))}
                       </div>
+                      {classBadges && <p className="text-[10px] text-indigo-700 font-semibold">🏫 숫자는 우리 반에서 그 배지를 받은 친구 수예요.</p>}
                       {next ? (
                         <div className="space-y-1">
                           <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
@@ -205,7 +218,7 @@ export default function BadgesView() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                 {list.map((b) => (
-                  <BadgeCard key={b.id} badge={b} />
+                  <BadgeCard key={b.id} badge={b} classCount={classCount(b.id)} />
                 ))}
               </div>
             )}

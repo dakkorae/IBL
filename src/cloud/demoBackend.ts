@@ -1,4 +1,4 @@
-import { BoardKind, Entry, Reaction, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, MAX_CLASS_STUDENTS, NICK_CHANGE_DAYS, Student } from './types';
+import { BoardKind, Entry, ClassInfo, ClassPublicStats, CloudBackend, CloudError, CloudRecord, FeedbackMap, InviteCode, MAX_CLASS_STUDENTS, NICK_CHANGE_DAYS, Student } from './types';
 import { emptyStats } from './stats';
 import { adminKeyHash, normalizeCode, pinHash, randomCode, teacherKeyHash } from './util';
 
@@ -14,7 +14,6 @@ interface DemoClass {
   stats?: ClassPublicStats;
   feedback?: Record<string, FeedbackMap>;
   boards?: Partial<Record<BoardKind, Record<string, Entry>>>;
-  reactions?: Record<string, Reaction>;
   reports?: { postId: string; sid: string }[];
 }
 interface DemoState {
@@ -93,6 +92,11 @@ export function createDemoBackend(): CloudBackend {
       s.invites[code] = { code, maxClasses, usedCount: 0, active: true, memo, createdAt: Date.now() };
       save(s);
       return s.invites[code];
+    },
+    async deleteInviteCode(code) {
+      const s = load();
+      delete s.invites[code];
+      save(s);
     },
     async setInviteActive(code, active) {
       const s = load();
@@ -173,7 +177,8 @@ export function createDemoBackend(): CloudBackend {
     },
     async setClassStats(classId, stats) {
       const s = load();
-      needTeacher(s, classId).stats = { ...stats, updatedAt: Date.now() };
+      const c = needTeacher(s, classId);
+      c.stats = { ...stats, badges: c.stats?.badges, updatedAt: Date.now() };
       save(s);
     },
     async listFeedback(classId) {
@@ -188,6 +193,19 @@ export function createDemoBackend(): CloudBackend {
       else delete c.feedback[sid][date];
       save(s);
     },
+    async setFeedbackMany(classId, sids, date, feedback) {
+      const s = load();
+      const c = needTeacher(s, classId);
+      c.feedback = c.feedback || {};
+      sids.forEach((sid) => (c.feedback![sid] = { ...(c.feedback![sid] || {}), [date]: feedback }));
+      save(s);
+    },
+    async clearReports(classId, postId) {
+      const s = load();
+      const c = needTeacher(s, classId);
+      c.reports = (c.reports || []).filter((r) => r.postId !== postId);
+      save(s);
+    },
     async removeEntry(classId, kind, postId) {
       const s = load();
       const c = needTeacher(s, classId);
@@ -197,9 +215,6 @@ export function createDemoBackend(): CloudBackend {
     },
     async listReports(classId) {
       return needTeacher(load(), classId).reports || [];
-    },
-    async listReactions(classId) {
-      return Object.values(needTeacher(load(), classId).reactions || {});
     },
     async deleteClass(classId) {
       await wait();
@@ -332,17 +347,18 @@ export function createDemoBackend(): CloudBackend {
       await wait();
       return Object.values(need(load(), classId).boards?.[kind] || {}).sort((a, b) => b.createdAt - a.createdAt);
     },
-    async getMyReactions(classId, sid) {
-      const all = Object.values(need(load(), classId).reactions || {});
-      return { mine: all.filter((r) => r.sid === sid), toMe: all.filter((r) => r.author === sid) };
+    async setLike(classId, kind, postId, sid, on) {
+      const s = load();
+      const e = need(s, classId).boards?.[kind]?.[postId];
+      if (!e) return;
+      e.likes = [...(e.likes || []).filter((x) => x !== sid), ...(on ? [sid] : [])];
+      save(s);
     },
-    async setReaction(classId, r) {
+    async setMyBadges(classId, sid, badgeIds) {
       const s = load();
       const c = need(s, classId);
-      c.reactions = c.reactions || {};
-      const id = `${r.postId}_${r.sid}`;
-      if (r.kind) c.reactions[id] = { postId: r.postId, sid: r.sid, author: r.author, kind: r.kind };
-      else delete c.reactions[id];
+      const st = (c.stats = c.stats || emptyStats());
+      st.badges = { ...(st.badges || {}), [sid]: badgeIds };
       save(s);
     },
     async reportPost(classId, postId, sid) {

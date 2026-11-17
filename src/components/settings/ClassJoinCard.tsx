@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Users, Check, Loader2, LogOut, CloudOff, Cloud, ArrowLeft, Pencil } from 'lucide-react';
 import { cloudMode, errorMessage, getBackend } from '../../cloud';
 import { ClassInfo, ClassSession, CloudRecord, NICKNAME_MAX, NICK_CHANGE_DAYS, Student } from '../../cloud/types';
@@ -59,11 +59,29 @@ export default function ClassJoinCard() {
     setError('');
   };
 
-  const findClass = (e: React.FormEvent) => {
-    e.preventDefault();
+  // 초대 QR(…?join=학급코드)로 들어온 경우: 코드를 채우고 바로 학급을 찾음. 주소의 코드는 지워 둠
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const invited = normalizeCode(params.get('join') || '').slice(0, 6);
+    if (!invited) return;
+    params.delete('join');
+    const rest = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
+    if (cloudMode === 'off') return;
+    if (classSession) {
+      if (classSession.classId !== invited) setError('이미 다른 학급에 참여하고 있어요. 초대받은 학급에 들어가려면 먼저 ‘학급에서 나가기’를 눌러 주세요.');
+      return;
+    }
+    setCode(invited);
+    findClass(undefined, invited);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const findClass = (e?: React.FormEvent, invited?: string) => {
+    e?.preventDefault();
     run(async () => {
       const backend = await getBackend();
-      const found = await backend.getClass(code);
+      const found = await backend.getClass(invited || code);
       if (!found) throw new Error('학급 코드를 찾을 수 없어요. 선생님께 받은 코드를 다시 확인해 주세요.');
       setInfo(found);
       setStep('who');

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldCheck, Loader2, Copy, Check, FlaskConical } from 'lucide-react';
+import { ShieldCheck, Loader2, Copy, Check, FlaskConical, Trash2 } from 'lucide-react';
 import { cloudMode, errorMessage, getBackend } from '../cloud';
 import { InviteCode } from '../cloud/types';
 import { adminKeyHash } from '../cloud/util';
@@ -15,6 +15,7 @@ export default function AdminApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState('');
   const [setupKey, setSetupKey] = useState('');
   const [setupHash, setSetupHash] = useState('');
 
@@ -120,6 +121,7 @@ export default function AdminApp() {
 
             <div className={`${card} p-4 sm:p-6`}>
               <h2 className="text-sm font-extrabold text-slate-900">발급한 코드 ({codes.length}개)</h2>
+              <p className="text-xs text-slate-500 mt-1">‘사용 중지’한 코드는 목록에서 삭제할 수 있어요. 삭제해도 그 코드로 이미 만든 학급은 그대로 남아요.</p>
               {codes.length === 0 && <p className="text-sm text-slate-500 mt-2">아직 만든 코드가 없어요.</p>}
               <ul className="mt-2 divide-y divide-slate-100">
                 {codes.map((c) => {
@@ -134,6 +136,19 @@ export default function AdminApp() {
                       <button type="button" disabled={busy} onClick={() => run(async (b) => { await b.setInviteActive(c.code, !c.active); setCodes((list) => list.map((x) => (x.code === c.code ? { ...x, active: !c.active } : x))); })} className={`${btnGhost} !h-9 !px-3 !text-xs`}>
                         {c.active ? '사용 중지' : '다시 사용'}
                       </button>
+                      {!c.active &&
+                        (confirmDelete === c.code ? (
+                          <>
+                            <button type="button" disabled={busy} onClick={() => run(async (b) => { await b.deleteInviteCode(c.code); setCodes((list) => list.filter((x) => x.code !== c.code)); setConfirmDelete(''); })} className={`${btnGhost} !h-9 !px-3 !text-xs !text-rose-600 !border-rose-300`}>
+                              정말 삭제
+                            </button>
+                            <button type="button" onClick={() => setConfirmDelete('')} className={`${btnGhost} !h-9 !px-3 !text-xs`}>취소</button>
+                          </>
+                        ) : (
+                          <button type="button" disabled={busy} onClick={() => setConfirmDelete(c.code)} title="목록에서 삭제" aria-label={`${c.code} 코드 삭제`} className={`${btnGhost} !h-9 !px-3 !text-xs`}>
+                            <Trash2 size={13} /> 삭제
+                          </button>
+                        ))}
                     </li>
                   );
                 })}

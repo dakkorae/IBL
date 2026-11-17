@@ -1,5 +1,6 @@
 import { Trophy, Sparkles, AlertCircle, Calendar, Award } from 'lucide-react';
 import { PROFILE_DATA } from '../data';
+import { FEEDBACK_STAMPS } from '../cloud/stats';
 import RadarChart from '../components/RadarChart';
 import HistoryBarChart from '../components/HistoryBarChart';
 import PeriodTabs from '../components/PeriodTabs';
@@ -227,7 +228,7 @@ export default function DashboardView() {
                   })}
                   {classData.feedback[record.date] && (
                     <p className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-2.5 py-1.5 break-words">
-                      👩‍🏫 선생님: {classData.feedback[record.date].stamp} {classData.feedback[record.date].text}
+                      👩‍🏫 선생님: {classData.feedback[record.date].stamp} {FEEDBACK_STAMPS.find((x) => x.stamp === classData.feedback[record.date].stamp)?.label} {classData.feedback[record.date].text}
                     </p>
                   )}
                   {!record.reflections?.length && record.memo && (
