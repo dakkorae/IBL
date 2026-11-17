@@ -127,12 +127,12 @@ export default function MissionView() {
           {PROFILE_DATA.map((profile, idx) => {
             const isSelected = selectedMissions.includes(profile.key);
             const disabled = submittedToday && !isEditingToday;
-            const isRerolled = !!(customMissionsByDate[selectedDate] && customMissionsByDate[selectedDate]![profile.key]);
             const isRecentlyChanged = recentlyRerolledKey === profile.key;
 
             const dateRerolls = rerollCountsByDate[selectedDate] || {};
             const categoryRerollCount = (typeof dateRerolls === 'object' ? (dateRerolls[profile.key] || 0) : 0);
             const remainingCategoryRerolls = Math.max(0, 3 - categoryRerollCount);
+            const isRerolled = categoryRerollCount > 0;
 
             return (
               <div

@@ -240,7 +240,7 @@ export function computeBadgeProgress(history: DailyRecord[], ctx: BadgeContext =
     const counts = rerolls[r.date] || {};
     return Object.values(counts).every((c) => !c);
   }).length;
-  p.reroll_master = missionRecords.filter((r) => r.completed.some((k) => !!custom[r.date]?.[k])).length;
+  p.reroll_master = missionRecords.filter((r) => r.completed.some((k) => (rerolls[r.date]?.[k] || 0) > 0)).length;
   const distinct = new Set<string>();
   missionRecords.forEach((r) =>
     r.completed.forEach((k) => distinct.add(`${k}|${getMissionForDay(k, r.date, custom[r.date] as Record<string, string> | undefined)}`))

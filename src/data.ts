@@ -257,13 +257,27 @@ export function hashStringToInt(str: string): number {
   return Math.abs(hash);
 }
 
-// Get day-specific unique mission based on seed (deterministic per day & profile)
+// 학생마다 다른 미션이 나오게 하는 씨앗값 (src/missionSeed.ts 가 앱이 켜질 때와 학급 참여·나가기 때 정함)
+let missionSeed = '';
+export const setMissionSeed = (seed: string) => {
+  missionSeed = seed;
+};
+// 비슷한 씨앗값(예: 1번·2번 학생)도 전혀 다른 숫자가 되도록 한 번 더 섞음
+const mixInt = (n: number) => {
+  let h = n | 0;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return (h ^ (h >>> 16)) >>> 0;
+};
+
+// 그날의 미션: 날짜 + 학습자상 + 학생마다 다른 씨앗값으로 100가지 중 하나를 고름 (같은 학생·같은 날에는 항상 같은 미션)
 export function getDefaultMissionForDay(profileKey: LearnerProfileKey, dateStr: string): string {
   const pool = IB_MISSIONS_1000[profileKey];
   if (!pool || pool.length === 0) return PROFILE_DATA.find((p) => p.key === profileKey)?.mission || '';
-  // Combine dateStr and profileKey for independent random distribution per category
-  const seed = hashStringToInt(`${dateStr}_${profileKey}`);
-  const idx = seed % pool.length;
+  // 씨앗값이 없으면 예전 방식(모든 학생이 같은 미션) — 예전 기록의 미션을 되찾을 때만 씀
+  const idx = missionSeed
+    ? mixInt(hashStringToInt(`${missionSeed}_${dateStr}_${profileKey}`)) % pool.length
+    : hashStringToInt(`${dateStr}_${profileKey}`) % pool.length;
   return pool[idx];
 }
 

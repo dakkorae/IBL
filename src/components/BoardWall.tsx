@@ -55,12 +55,13 @@ export default function BoardWall({ entries, empty, me, onLike, actions, badge }
                 {entry.toName && (
                   <p className="text-sm font-black text-blue-700 break-words">To. {entry.toName}</p>
                 )}
+                {/* 나눔 글(미션이 있는 글)은 직접 쓴 실천 내용을 크게, 그날의 미션은 아래에 작게 */}
+                <p className={`leading-relaxed break-words whitespace-pre-line ${entry.mission ? 'text-base font-bold text-slate-900' : 'text-sm text-slate-800'}`}>{entry.text}</p>
                 {entry.mission && (
-                  <p className="text-xs font-bold text-slate-700 bg-white/70 border border-white rounded-lg px-2 py-1.5 leading-relaxed break-words">
-                    <span className="text-indigo-700">📌 미션</span> {entry.mission}
+                  <p className="text-[11px] text-slate-500 leading-relaxed break-words pt-1.5 border-t border-slate-900/10">
+                    <span className="font-bold">📌 그날의 미션</span> · {entry.mission}
                   </p>
                 )}
-                <p className="text-sm text-slate-800 leading-relaxed break-words whitespace-pre-line">{entry.text}</p>
               </div>
               <div className="px-3.5 py-2 bg-white/70 border-t border-white flex items-center gap-2">
                 <p className="min-w-0 flex-1 text-xs text-slate-600 truncate">

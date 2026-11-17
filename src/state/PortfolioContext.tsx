@@ -7,6 +7,11 @@ import { getBackend, loadClassSession, saveClassSession } from '../cloud';
 import { ClassInfo, ClassPublicStats, ClassSession, CloudRecord, FeedbackMap, RenameResult, Student } from '../cloud/types';
 import { badWordMessage } from '../filter';
 import { recordDelta } from '../cloud/stats';
+import { setMissionSeed } from '../data';
+import { freezeMissions, prepareMissionSeed, seedFor } from '../missionSeed';
+
+// 학생마다 다른 미션이 나오도록 씨앗값을 먼저 정해 둠 (저장된 기록을 읽기 전에)
+prepareMissionSeed();
 
 export const MIN_REFLECTION_LENGTH = 5;
 const emptyReflection = (): Reflection => ({ profileKey: null, text: '' });
@@ -677,11 +682,11 @@ function usePortfolioState() {
   };
 
   // 기기 기록 → 서버 기록 (그날 실천한 미션 문장과 바꾼 횟수를 함께 담음)
-  const toCloudRecord = (r: DailyRecord): CloudRecord => {
+  const toCloudRecord = (r: DailyRecord, custom = customMissionsByDate): CloudRecord => {
     const missions: Partial<Record<LearnerProfileKey, string>> = {};
     if (!r.reflectionOnly) {
       r.completed.forEach((k) => {
-        missions[k] = getMissionForDay(k, r.date, customMissionsByDate[r.date] as Record<string, string> | undefined);
+        missions[k] = getMissionForDay(k, r.date, custom[r.date] as Record<string, string> | undefined);
       });
     }
     const rerolls = rerollCountsByDate[r.date];
@@ -746,14 +751,15 @@ function usePortfolioState() {
     records: DailyRecord[],
     session: ClassSession | null = classSession,
     previous?: DailyRecord,
-    updateStats = true
+    updateStats = true,
+    custom = customMissionsByDate
   ): Promise<boolean> => {
     if (!session || records.length === 0) return true;
     const dates = records.map((r) => r.date);
     setSyncState('syncing');
     try {
       const backend = await getBackend();
-      await backend.saveRecords(session.classId, session.sid, records.map(toCloudRecord));
+      await backend.saveRecords(session.classId, session.sid, records.map((r) => toCloudRecord(r, custom)));
       if (updateStats) {
         // 우리 반 합계에 이번 변화를 반영 (실패해도 기록 저장에는 영향 없음. 교사 화면이 열릴 때 다시 맞춰짐)
         backend
@@ -774,7 +780,7 @@ function usePortfolioState() {
   };
 
   // 서버 기록을 이 기기에 그대로 반영
-  const applyCloudRecords = (records: CloudRecord[]) => {
+  const applyCloudRecords = (records: CloudRecord[], baseCustom = customMissionsByDate) => {
     const nextCustom: Record<string, Partial<Record<LearnerProfileKey, string>>> = {};
     const nextRerolls: Record<string, Partial<Record<LearnerProfileKey, number>>> = {};
     const nextHistory: DailyRecord[] = records
@@ -792,7 +798,7 @@ function usePortfolioState() {
 
     // 아직 제출하지 않은 날짜에서 바꿔 둔 미션은 그대로 둠
     const submittedDates = new Set(nextHistory.map((r) => r.date));
-    Object.entries(customMissionsByDate).forEach(([d, v]) => {
+    Object.entries(baseCustom).forEach(([d, v]) => {
       if (!submittedDates.has(d)) nextCustom[d] = v;
     });
     Object.entries(rerollCountsByDate).forEach(([d, v]) => {
@@ -813,10 +819,15 @@ function usePortfolioState() {
   // - 'push': 이 기기의 기록을 서버에 올림
   // - 'fresh': 빈 기록으로 새로 시작
   const connectClass = async (session: ClassSession, mode: 'pull' | 'push' | 'fresh', cloudRecords: CloudRecord[] = []) => {
-    if (mode === 'pull') applyCloudRecords(cloudRecords);
-    if (mode === 'fresh') applyCloudRecords([]);
+    // 미션 씨앗값이 학급용으로 바뀌므로, 지금까지 기록했거나 쓰고 있던 날의 미션은 그대로 적어 둠
+    const frozen = freezeMissions(history, customMissionsByDate);
+    setMissionSeed(seedFor(session));
+    if (mode === 'pull') applyCloudRecords(cloudRecords, frozen);
+    if (mode === 'fresh') applyCloudRecords([], frozen);
     if (mode === 'push') {
-      const ok = await pushToClass(history.filter((r) => r.submitted), session);
+      setCustomMissionsByDate(frozen);
+      localStorage.setItem('ib_custom_missions_by_date', JSON.stringify(frozen));
+      const ok = await pushToClass(history.filter((r) => r.submitted), session, undefined, true, frozen);
       if (!ok) throw new Error('이 기기의 기록을 학급에 올리지 못했어요. 잠시 후 다시 시도해 주세요.');
       localStorage.setItem('ib_has_reset', 'true');
     }
@@ -861,7 +872,12 @@ function usePortfolioState() {
 
   const disconnectClass = async () => {
     const session = classSession;
+    // 미션 씨앗값이 기기용으로 돌아가므로, 기록한 날의 미션은 그대로 적어 둠
+    const frozen = freezeMissions(history, customMissionsByDate);
+    setCustomMissionsByDate(frozen);
+    localStorage.setItem('ib_custom_missions_by_date', JSON.stringify(frozen));
     saveClassSession(null);
+    setMissionSeed(seedFor(null));
     setClassSession(null);
     setClassData({ info: null, stats: null, feedback: {}, me: null });
     localStorage.removeItem(PENDING_KEY);

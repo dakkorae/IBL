@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Send, Flag, Megaphone, Trash2 } from 'lucide-react';
+import { Loader2, Send, Flag, Megaphone, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { LearnerProfileKey } from '../../types';
 import { PROFILE_DATA, getMissionForDay } from '../../data';
 import { errorMessage, getBackend } from '../../cloud';
@@ -36,6 +36,7 @@ export default function Community({ mode }: { mode: BoardKind }) {
   const [key, setKey] = useState('');
   const [text, setText] = useState('');
   const [pick, setPick] = useState('');
+  const [pickPage, setPickPage] = useState(1);
 
   const remember = (next: Record<BoardKind, Entry[]>) => {
     setBoards(next);
@@ -112,7 +113,7 @@ export default function Community({ mode }: { mode: BoardKind }) {
     });
   };
 
-  // 게시판에 나눌 수 있는 내 실천 기록 (최근 것부터 15개)
+  // 게시판에 나눌 수 있는 내 실천 기록 (최근 것부터, 5개씩 쪽을 나눠 보여 줌)
   const myLines = history
     .filter((r) => r.submitted)
     .sort((a, b) => b.date.localeCompare(a.date))
@@ -122,7 +123,11 @@ export default function Community({ mode }: { mode: BoardKind }) {
         // 그날 그 학습자상으로 실천한 미션 문장을 함께 찾아 둠
         .map((x, i) => ({ id: `${r.date}#${i}`, date: r.date, ...x, mission: getMissionForDay(x.profileKey!, r.date, customMissionsByDate[r.date] as Record<string, string> | undefined) }))
     )
-    .slice(0, 15);
+    .slice(0, 200);
+  const PICK_PAGE = 5;
+  const pickPages = Math.max(1, Math.ceil(myLines.length / PICK_PAGE));
+  const pickNow = Math.min(pickPage, pickPages);
+  const pageLines = myLines.slice((pickNow - 1) * PICK_PAGE, pickNow * PICK_PAGE);
   const share = (e: React.FormEvent) => {
     e.preventDefault();
     const line = myLines.find((l) => l.id === pick);
@@ -193,8 +198,8 @@ export default function Community({ mode }: { mode: BoardKind }) {
           <p className="text-xs text-slate-500">내가 쓴 실천 기록 중 친구들과 나누고 싶은 것을 골라 주세요. 그날 고른 미션도 함께 올라가요.</p>
           {myLines.length === 0 ? <p className="text-sm text-slate-500">아직 나눌 수 있는 실천 기록이 없어요. 미션을 실천하고 기록을 남겨 보세요.</p> : (
             <>
-              <div role="radiogroup" aria-label="나눌 기록 고르기" className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                {myLines.map((l) => {
+              <div role="radiogroup" aria-label="나눌 기록 고르기" className="space-y-2">
+                {pageLines.map((l) => {
                   const p = profileOf(l.profileKey);
                   const on = pick === l.id;
                   return (
@@ -205,13 +210,20 @@ export default function Community({ mode }: { mode: BoardKind }) {
                           <span className="font-bold text-slate-500 whitespace-nowrap">{Number(l.date.slice(5, 7))}월 {Number(l.date.slice(8))}일</span>
                           {p && <span className={`px-1.5 py-0.5 rounded-md font-bold whitespace-nowrap ${p.bgColor} ${p.textColor}`}>{p.emoji} {p.name}</span>}
                         </span>
-                        {l.mission && <span className="block text-xs font-bold text-slate-700 break-words"><span className="text-indigo-700">📌 미션</span> {l.mission}</span>}
-                        <span className="block text-sm text-slate-800 break-words">{l.text}</span>
+                        <span className="block text-sm font-bold text-slate-900 break-words">{l.text}</span>
+                        {l.mission && <span className="block text-[11px] text-slate-500 break-words"><span className="font-bold">📌 그날의 미션</span> · {l.mission}</span>}
                       </span>
                     </label>
                   );
                 })}
               </div>
+              {pickPages > 1 && (
+                <div className="flex items-center justify-center gap-2" aria-label="기록 목록 쪽 이동">
+                  <button type="button" disabled={pickNow === 1} onClick={() => setPickPage(pickNow - 1)} aria-label="이전 기록" className="w-10 h-10 rounded-xl border border-slate-200 bg-white text-slate-600 inline-flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16} /></button>
+                  <span className="text-xs font-bold text-slate-600 min-w-16 text-center">{pickNow} / {pickPages}쪽</span>
+                  <button type="button" disabled={pickNow === pickPages} onClick={() => setPickPage(pickNow + 1)} aria-label="다음 기록" className="w-10 h-10 rounded-xl border border-slate-200 bg-white text-slate-600 inline-flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16} /></button>
+                </div>
+              )}
               <button type="submit" disabled={busy || !pick} className={primary}><Megaphone size={15} /> 게시판에 올리기</button>
             </>
           )}
